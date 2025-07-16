@@ -108,3 +108,21 @@ Once the service is running, you can send ZPL commands to your configured printe
 - Ensure your printer is properly connected and recognized by the system
 - Verify the printer name matches exactly with your system's printer configuration
 - Check that the specified port is available and not in use by other services
+
+6. **Install mkcert**
+
+   - `mkcert` is required to generate local trusted certificates.
+   - Installation guide:  
+     [mkcert GitHub Repository](https://github.com/FiloSottile/mkcert)
+
+7. **Set Up SSL Certificates**
+
+   ```
+   bash setup_ssl.sh
+   ```
+
+8. **Install Certificate on Android**
+
+   - Go to:  
+     `Settings > Security > Encryption & credentials > Install a certificate > CA`
+   - Select the file: `rootCA.pem`
