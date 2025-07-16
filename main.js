@@ -3,6 +3,8 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const { exec } = require('child_process');
 const cors = require('cors');
+const https = require('https');
+const fs = require('fs');
 
 const app = express();
 const port = process.env.PORT ?? 3000;
@@ -73,6 +75,12 @@ app.post('/print', (req, res) => {
 });
 
 // Start the server
-app.listen(port, () => {
-  console.log(`Server is running on http://localhost:${port}`);
-});
+const privateKey = fs.readFileSync('./certs/key.pem', 'utf8');
+const certificate = fs.readFileSync('./certs/cert.pem', 'utf8');
+const credentials = { key: privateKey, cert: certificate };
+
+const httpsServer = https.createServer(credentials, app);
+
+httpsServer.listen(port, () => {
+  console.log(`HTTPS Server is running on ${port}`);
+})
