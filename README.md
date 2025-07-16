@@ -112,14 +112,15 @@ Once the service is running, you can send ZPL commands to your configured printe
 6. **Install mkcert**
 
    - `mkcert` is required to generate local trusted certificates.
-   - Installation guide: 
-   Follow this for linux
+   - Installation guide:
 
+   - Follow this for linux
    wget -O mkcert "https://dl.filippo.io/mkcert/latest?for=linux/amd64"
    chmod +x mkcert
    sudo mv mkcert /usr/local/bin/
    mkcert -install 
-      or
+      
+   OR
    [mkcert GitHub Repository](https://github.com/FiloSottile/mkcert)
      
     
