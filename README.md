@@ -115,10 +115,10 @@ Once the service is running, you can send ZPL commands to your configured printe
    - Installation guide:
 
    - Follow this for linux
-   wget -O mkcert "https://dl.filippo.io/mkcert/latest?for=linux/amd64"
-   chmod +x mkcert
-   sudo mv mkcert /usr/local/bin/
-   mkcert -install 
+   - wget -O mkcert "https://dl.filippo.io/mkcert/latest?for=linux/amd64"
+   - chmod +x mkcert
+   - sudo mv mkcert /usr/local/bin/
+   - mkcert -install 
       
    OR
    [mkcert GitHub Repository](https://github.com/FiloSottile/mkcert)
