@@ -4,6 +4,11 @@
   "description": "",
   "main": "main.js",
   "scripts": {
+    "setup": "bash ./install.sh",
+    "doctor": "bash ./scripts/doctor.sh",
+    "start": "node main.js",
+    "dev": "node main.js",
+    "service:install": "bash ./scripts/install-service.sh",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
