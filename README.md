@@ -5,93 +5,73 @@ A Node.js service for handling ZPL (Zebra Programming Language) label printing.
 ## Prerequisites
 
 - Node.js 18 or higher
+- CUPS commands available (`lp` and `lpstat`)
 
 ## Installation & Setup
 
-1. **Clone the repository** (if applicable)
-   ```bash
-   git clone git@github.com:Kuunika/zplexpress.git
-   cd zplexpress
-   ```
+Run the installer:
 
-2. **Install dependencies**
-   ```bash
-   npm install
-   ```
+```bash
+chmod +x install.sh
+./install.sh
+```
 
-3. **Configure environment variables**
-   - Rename `.env.example` to `.env`
-   - Update the configuration with your printer details:
-   ```env
-   PRINTER_NAME=your_printer_name
-   PORT=3000
-   ```
+The installer will:
+- Install dependencies (`npm ci` or `npm install`)
+- Create `.env` from `.env.example` if missing
+- Prompt for `PRINTER_NAME` and `PORT`
+- Run preflight checks
+- Optionally install a Linux `systemd` service
 
-## Configuration
+You can also run:
 
-The service requires the following environment variables:
+```bash
+npm run setup
+```
 
-- `PRINTER_NAME`: The name of your ZPL-compatible printer
-- `PORT`: The port number for the service (default: 3000)
+## Validation
+
+Run preflight checks any time:
+
+```bash
+npm run doctor
+```
+
+This checks:
+- Node/npm availability and Node version
+- `.env` presence and `PORT` validity
+- `lp`/`lpstat` commands
+- Printer detection and `PRINTER_NAME`
 
 ## Running the Service
-
-### Development Mode
 
 Start the service with:
 
 ```bash
-node main.js
+npm start
 ```
 
 The service will be available at `http://localhost:3000` (or your configured port).
 
-### Production Deployment (Linux systemd)
+## Configuration
 
-For production deployment, you can configure the service to run as a systemd service:
+The service uses:
+- `PRINTER_NAME`: The name of your ZPL-compatible printer
+- `PORT`: The port number for the service (default: 3000)
 
-1. **Update the service file**
-   - Edit the `zpl.service` file in your project directory
-   - Update the paths to match your actual installation:
-   ```ini
-   [Unit]
-   Description=zpl printing Service
-   After=network.target
-   
-   [Service]
-   ExecStart=/usr/bin/node /path/to/your/main.js
-   Restart=always
-   User=nobody
-   Group=nogroup
-   Environment=PATH=/usr/bin:/usr/local/bin
-   Environment=NODE_ENV=production
-   WorkingDirectory=/path/to/your/app
-   
-   [Install]
-   WantedBy=multi-user.target
-   ```
+## Production Deployment (Linux systemd)
 
-2. **Install and enable the service**
-   ```bash
-   sudo cp zpl.service /etc/systemd/system/
-   sudo systemctl daemon-reload
-   sudo systemctl enable zpl.service
-   ```
+Install and enable the service automatically:
 
-3. **Start the service**
-   ```bash
-   sudo systemctl start zpl.service
-   ```
+```bash
+npm run service:install
+```
 
-4. **Check service status**
-   ```bash
-   sudo systemctl status zpl.service
-   ```
+Then inspect logs:
 
-5. **View service logs**
-   ```bash
-   sudo journalctl -u zpl.service -f
-   ```
+```bash
+sudo journalctl -u zpl.service -f
+```
 
 ## Usage
 
