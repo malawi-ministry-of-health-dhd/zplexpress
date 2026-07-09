@@ -1,0 +1,62 @@
+const { select, input } = require('@inquirer/prompts');
+const { listPrinters, getDefaultPrinter } = require('./printers');
+const { loadConfig, saveConfig } = require('./config');
+
+// Interactive terminal wizard: detect connected printers, let the user pick
+// one and set the server port, then persist the choice to config.json.
+async function runWizard() {
+  const current = loadConfig();
+
+  console.log('\nDetecting connected printers...\n');
+
+  let printers = [];
+  try {
+    printers = await listPrinters();
+  } catch (err) {
+    console.error('Failed to list printers via lpstat:', err.message);
+    console.error('Make sure CUPS is installed and your printer is connected.');
+    process.exit(1);
+  }
+
+  if (printers.length === 0) {
+    console.error('No printers found. Connect a printer (and make sure it is');
+    console.error('registered with CUPS), then run `node main.js setup` again.');
+    process.exit(1);
+  }
+
+  const defaultPrinter = await getDefaultPrinter();
+  const preselect = current.printerName ?? defaultPrinter;
+
+  console.log(`Found ${printers.length} printer(s).\n`);
+
+  const printerName = await select({
+    message: 'Select the printer to use:',
+    choices: printers.map(p => ({
+      name: `${p.name}  (${p.status})`,
+      value: p.name,
+    })),
+    default: printers.some(p => p.name === preselect) ? preselect : undefined,
+  });
+
+  const portInput = await input({
+    message: 'Port for the print server:',
+    default: String(current.port),
+    validate: value => {
+      const n = Number(value);
+      return Number.isInteger(n) && n > 0 && n < 65536
+        ? true
+        : 'Enter a valid port number (1-65535)';
+    },
+  });
+
+  const config = { printerName, port: Number(portInput) };
+  saveConfig(config);
+
+  console.log(`\nSaved configuration:`);
+  console.log(`  Printer: ${config.printerName}`);
+  console.log(`  Port:    ${config.port}\n`);
+
+  return config;
+}
+
+module.exports = { runWizard };

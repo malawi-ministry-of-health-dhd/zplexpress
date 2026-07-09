@@ -19,20 +19,37 @@ A Node.js service for handling ZPL (Zebra Programming Language) label printing.
    npm install
    ```
 
-3. **Configure environment variables**
-   - Rename `.env.example` to `.env`
-   - Update the configuration with your printer details:
-   ```env
-   PRINTER_NAME=your_printer_name
-   PORT=3000
+3. **Configure the printer and port (terminal wizard)**
+   ```bash
+   node main.js setup
    ```
+   This detects the printers connected to your system (via CUPS), shows a
+   list to choose from, and asks which port the server should run on. Your
+   choice is saved to `config.json`.
 
 ## Configuration
 
-The service requires the following environment variables:
+Configuration is stored in `config.json` and managed through the interactive
+setup wizard:
 
-- `PRINTER_NAME`: The name of your ZPL-compatible printer
-- `PORT`: The port number for the service (default: 3000)
+```bash
+node main.js setup
+```
+
+The wizard lets you:
+
+- **Select a printer** — all printers registered with CUPS (`lpstat -p`) are
+  listed; if more than one is connected you pick the one to use.
+- **Set the port** — the port the print server listens on.
+
+`config.json` holds two values:
+
+- `printerName`: The name of the selected ZPL-compatible printer
+- `port`: The port number for the service (default: 3000)
+
+If no printer has been configured yet, the setup wizard runs automatically the
+first time you start the server. Environment variables (`PRINTER_NAME`, `PORT`
+in `.env`) are still honored as a fallback when `config.json` is absent.
 
 ## Running the Service
 

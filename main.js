@@ -4,57 +4,68 @@ const bodyParser = require('body-parser');
 const { exec } = require('child_process');
 const cors = require('cors');
 
-const app = express();
-const port = process.env.PORT ?? 3000;
+const { loadConfig } = require('./config');
+const { listPrinters, printerExists } = require('./printers');
+const { runWizard } = require('./setup');
 
-console.log(`Starting server on port ${port}`);
-
-app.use(cors());
-app.use(bodyParser.json());
-app.use(bodyParser.urlencoded({ extended: true }));
-
-app.get("/test", (req, res) => {
-  res.status(200).json({ status: "Server is running!!!" });
-});
-
-app.post('/print', (req, res) => {
-  const { zpl } = req.body;
-
-  if (!zpl || typeof zpl !== 'string' || zpl.trim() === '') {
-    return res.status(400).json({ error: 'ZPL data is required in the request body' });
+async function main() {
+  // `node main.js setup` launches the interactive configuration wizard.
+  if (process.argv.includes('setup')) {
+    await runWizard();
+    process.exit(0);
   }
 
-  // Step 1: Detect Zebra printer
-  exec('lpstat -p', (err, stdout, stderr) => {
-    if (err) {
-      console.error('Failed to list printers:', stderr);
-      return res.status(500).json({ error: 'Could not list printers' });
+  let config = loadConfig();
+
+  // Auto-fallback: if no printer has been configured yet, run the wizard once.
+  if (!config.printerName) {
+    console.log('No printer configured yet — starting setup.');
+    config = await runWizard();
+  }
+
+  startServer(config);
+}
+
+function startServer(config) {
+  const app = express();
+  const { port, printerName } = config;
+
+  console.log(`Starting server on port ${port} (printer: ${printerName})`);
+
+  app.use(cors());
+  app.use(bodyParser.json());
+  app.use(bodyParser.urlencoded({ extended: true }));
+
+  app.get('/test', (req, res) => {
+    res.status(200).json({ status: 'Server is running!!!' });
+  });
+
+  app.get('/printers', async (req, res) => {
+    try {
+      const printers = await listPrinters();
+      res.status(200).json({ configured: printerName, printers });
+    } catch (err) {
+      res.status(500).json({ error: 'Could not list printers' });
+    }
+  });
+
+  app.post('/print', async (req, res) => {
+    const { zpl } = req.body;
+
+    if (!zpl || typeof zpl !== 'string' || zpl.trim() === '') {
+      return res.status(400).json({ error: 'ZPL data is required in the request body' });
     }
 
-    // Parse printers
-    const printers = stdout
-      .split('\n')
-      .map(line => line.trim())
-      .filter(line => line.startsWith('printer'))
-      .map(line => {
-        const match = line.match(/^printer\s+(\S+)/);
-        return match ? match[1] : null;
-      })
-      .filter(Boolean);
-
-    const zebraPrinter = printers.find(p => /zebra/i.test(p));
-    const printerName = zebraPrinter || process.env.PRINTER_NAME;
-
-    if (!printerName) {
-      console.error('No Zebra printer found and PRINTER_NAME not set in environment.');
-      return res.status(400).json({ error: 'No printer found. Please connect a Zebra printer or set PRINTER_NAME in .env' });
+    if (!(await printerExists(printerName))) {
+      console.error(`Configured printer "${printerName}" is not available.`);
+      return res.status(400).json({
+        error: `Configured printer "${printerName}" is not available. Run \`node main.js setup\` to reconfigure.`,
+      });
     }
 
     console.log(`Using printer: ${printerName}`);
 
-    const lpCommand = `lp -d ${printerName} -o raw`;
-
-    const printProcess = exec(lpCommand, (error, stdout, stderr) => {
+    const printProcess = exec(`lp -d ${printerName} -o raw`, (error, stdout, stderr) => {
       if (error) {
         console.error(`Print error: ${error}`);
         return res.status(500).json({ error: 'Failed to print label' });
@@ -66,13 +77,22 @@ app.post('/print', (req, res) => {
       res.status(200).json({ message: `Label sent to printer: ${printerName}` });
     });
 
-    // Send ZPL via stdin to avoid shell quoting issues
+    // Send ZPL via stdin to avoid shell quoting issues.
     printProcess.stdin.write(zpl);
     printProcess.stdin.end();
   });
-});
 
-// Start the server
-app.listen(port, () => {
-  console.log(`Server is running on http://localhost:${port}`);
+  app.listen(port, () => {
+    console.log(`Server is running on http://localhost:${port}`);
+  });
+}
+
+main().catch(err => {
+  // Raised by @inquirer when the user cancels the wizard (Ctrl+C).
+  if (err && err.name === 'ExitPromptError') {
+    console.log('\nSetup cancelled.');
+    process.exit(0);
+  }
+  console.error(err);
+  process.exit(1);
 });
