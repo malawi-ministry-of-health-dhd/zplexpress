@@ -4,6 +4,8 @@
   "description": "",
   "main": "main.js",
   "scripts": {
+    "setup": "node main.js setup",
+    "install-service": "bash install-service.sh",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],

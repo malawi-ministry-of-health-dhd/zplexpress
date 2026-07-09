@@ -65,50 +65,38 @@ The service will be available at `http://localhost:3000` (or your configured por
 
 ### Production Deployment (Linux systemd)
 
-For production deployment, you can configure the service to run as a systemd service:
+An installer script sets up the systemd service automatically. It detects the
+`node` binary and project directory, generates the unit file with the correct
+paths, then enables and starts the service.
 
-1. **Update the service file**
-   - Edit the `zpl.service` file in your project directory
-   - Update the paths to match your actual installation:
-   ```ini
-   [Unit]
-   Description=zpl printing Service
-   After=network.target
-   
-   [Service]
-   ExecStart=/usr/bin/node /path/to/your/main.js
-   Restart=always
-   User=nobody
-   Group=nogroup
-   Environment=PATH=/usr/bin:/usr/local/bin
-   Environment=NODE_ENV=production
-   WorkingDirectory=/path/to/your/app
-   
-   [Install]
-   WantedBy=multi-user.target
-   ```
-
-2. **Install and enable the service**
+1. **Configure the printer first** (systemd has no terminal for the wizard):
    ```bash
-   sudo cp zpl.service /etc/systemd/system/
-   sudo systemctl daemon-reload
-   sudo systemctl enable zpl.service
+   npm run setup
    ```
 
-3. **Start the service**
+2. **Install the service** (re-runs itself with `sudo` if needed):
    ```bash
-   sudo systemctl start zpl.service
+   npm run install-service
+   # or: ./install-service.sh
    ```
 
-4. **Check service status**
-   ```bash
-   sudo systemctl status zpl.service
-   ```
+That's it — the service is enabled (starts on boot) and running.
 
-5. **View service logs**
-   ```bash
-   sudo journalctl -u zpl.service -f
-   ```
+**View service logs:**
+```bash
+sudo journalctl -u zpl.service -f
+```
+
+**Check status / restart manually:**
+```bash
+sudo systemctl status zpl.service
+sudo systemctl restart zpl.service
+```
+
+The installer runs the service as the invoking user (so it can access the
+printer and read `config.json`). To use a different user, edit
+`/etc/systemd/system/zpl.service` after installing, or re-run the installer
+with `RUN_USER` / `RUN_GROUP` set.
 
 ## Usage
 
