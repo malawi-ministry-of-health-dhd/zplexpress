@@ -5,7 +5,7 @@ const bodyParser = require('body-parser');
 const { exec } = require('child_process');
 const cors = require('cors');
 
-const { loadConfig } = require('./config');
+const { loadConfig, saveConfig } = require('./config');
 const { listPrinters, printerExists, getPrinterStatus, listJobs } = require('./printers');
 const { runWizard } = require('./setup');
 
@@ -29,7 +29,9 @@ async function main() {
 
 function startServer(config) {
   const app = express();
-  const { port, printerName } = config;
+  const { port } = config;
+  // Mutable so it can be changed at runtime via POST /printer.
+  let printerName = config.printerName;
 
   console.log(`Starting server on port ${port} (printer: ${printerName})`);
 
@@ -69,6 +71,23 @@ function startServer(config) {
     } catch (err) {
       res.status(500).json({ error: 'Could not list printers' });
     }
+  });
+
+  // Change the active printer at runtime and persist it to config.json.
+  app.post('/printer', async (req, res) => {
+    const name = req.body.printerName;
+
+    if (!name || typeof name !== 'string') {
+      return res.status(400).json({ error: 'printerName is required' });
+    }
+    if (!(await printerExists(name))) {
+      return res.status(400).json({ error: `Printer "${name}" is not available` });
+    }
+
+    printerName = name;
+    saveConfig({ printerName: name, port });
+    console.log(`Active printer changed to: ${name}`);
+    res.status(200).json({ message: `Active printer set to ${name}`, printerName: name });
   });
 
   app.post('/print', async (req, res) => {

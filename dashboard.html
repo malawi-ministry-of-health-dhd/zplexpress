@@ -47,6 +47,11 @@
     .badge.running { background: var(--ok-bg); color: var(--ok); }
     .badge.pending { background: var(--warn-bg); color: var(--warn); }
     .empty { color: var(--muted); text-align: center; padding: 24px 0; }
+    select { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; max-width: 100%; cursor: pointer; }
+    select:disabled { opacity: .6; cursor: default; }
+    .msg { margin-top: 12px; font-size: 13px; padding: 8px 12px; border-radius: 8px; }
+    .msg.ok { background: var(--ok-bg); color: var(--ok); }
+    .msg.err { background: var(--err-bg); color: var(--err); }
     .foot { color: var(--muted); font-size: 13px; text-align: center; margin-top: 8px; }
     .table-wrap { overflow-x: auto; }
   </style>
@@ -60,8 +65,12 @@
 
     <div class="card">
       <h2>Printer</h2>
-      <div class="row"><span class="k">Name</span><span class="v" id="printer-name">—</span></div>
+      <div class="row">
+        <span class="k">Active printer</span>
+        <span class="v"><select id="printer-select"><option>Loading…</option></select></span>
+      </div>
       <div class="row"><span class="k">State</span><span class="v" id="printer-state">—</span></div>
+      <div id="printer-msg" class="msg" hidden></div>
     </div>
 
     <div class="card">
@@ -82,6 +91,48 @@
 
   <script>
     const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
+    const select = document.getElementById('printer-select');
+    const msg = document.getElementById('printer-msg');
+
+    function showMsg(text, ok) {
+      msg.textContent = text;
+      msg.className = 'msg ' + (ok ? 'ok' : 'err');
+      msg.hidden = false;
+    }
+
+    // Load the list of available printers into the dropdown (once, on startup).
+    async function loadPrinters() {
+      try {
+        const res = await fetch('/printers', { cache: 'no-store' });
+        const data = await res.json();
+        select.innerHTML = data.printers
+          .map(p => '<option value="' + esc(p.name) + '">' + esc(p.name) + '</option>').join('');
+        if (data.configured) select.value = data.configured;
+      } catch (err) {
+        select.innerHTML = '<option>Could not load printers</option>';
+      }
+    }
+
+    // Switch the active printer when the user picks a different one.
+    select.addEventListener('change', async () => {
+      const name = select.value;
+      select.disabled = true;
+      try {
+        const res = await fetch('/printer', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ printerName: name }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to switch printer');
+        showMsg('Active printer set to ' + name, true);
+        refresh();
+      } catch (err) {
+        showMsg('Error: ' + err.message, false);
+      } finally {
+        select.disabled = false;
+      }
+    });
 
     async function refresh() {
       const service = document.getElementById('service');
@@ -93,7 +144,11 @@
         service.className = 'pill ok';
         service.innerHTML = '<span class="dot live"></span> Running';
 
-        document.getElementById('printer-name').textContent = data.printer.name || '—';
+        // Keep the dropdown in sync with the active printer, unless the user
+        // is currently interacting with it.
+        if (data.printer.name && document.activeElement !== select && !select.disabled) {
+          select.value = data.printer.name;
+        }
         document.getElementById('printer-state').textContent =
           (data.printer.available ? '' : '⚠ unavailable — ') + (data.printer.state || 'unknown');
 
@@ -121,6 +176,7 @@
       }
     }
 
+    loadPrinters();
     refresh();
     setInterval(refresh, 3000);
   </script>
