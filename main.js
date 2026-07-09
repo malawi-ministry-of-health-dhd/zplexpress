@@ -1,11 +1,12 @@
 require('dotenv').config();
+const path = require('path');
 const express = require('express');
 const bodyParser = require('body-parser');
 const { exec } = require('child_process');
 const cors = require('cors');
 
 const { loadConfig } = require('./config');
-const { listPrinters, printerExists } = require('./printers');
+const { listPrinters, printerExists, getPrinterStatus, listJobs } = require('./printers');
 const { runWizard } = require('./setup');
 
 async function main() {
@@ -35,6 +36,27 @@ function startServer(config) {
   app.use(cors());
   app.use(bodyParser.json());
   app.use(bodyParser.urlencoded({ extended: true }));
+
+  // Status dashboard.
+  app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'dashboard.html'));
+  });
+
+  // Service + printer + job status as JSON (polled by the dashboard).
+  app.get('/status', async (req, res) => {
+    try {
+      const printer = await getPrinterStatus(printerName);
+      const jobs = await listJobs(printer.activeJobId);
+      res.status(200).json({
+        service: 'running',
+        printer: { name: printerName, available: printer.available, state: printer.state },
+        jobs,
+      });
+    } catch (err) {
+      console.error('Failed to read status:', err.message);
+      res.status(500).json({ error: 'Could not read printer status' });
+    }
+  });
 
   app.get('/test', (req, res) => {
     res.status(200).json({ status: 'Server is running!!!' });

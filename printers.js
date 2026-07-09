@@ -37,4 +37,42 @@ async function printerExists(name) {
   return printers.some(p => p.name === name);
 }
 
-module.exports = { listPrinters, getDefaultPrinter, printerExists };
+// Return the current status of a printer: whether it exists, its raw state
+// string, and the id of the job it is actively printing (if any).
+async function getPrinterStatus(name) {
+  const printer = (await listPrinters()).find(p => p.name === name);
+  if (!printer) {
+    return { available: false, state: 'not found', activeJobId: null };
+  }
+
+  const printing = printer.status.match(/now printing\s+([^.\s]+)/);
+  return {
+    available: true,
+    state: printer.status,
+    activeJobId: printing ? printing[1] : null,
+  };
+}
+
+// List queued print jobs (not yet completed) via `lpstat -o`.
+// Each job is marked "running" if it is the printer's active job, else "pending".
+async function listJobs(activeJobId = null) {
+  const { stdout } = await execAsync('lpstat -o');
+
+  return stdout
+    .split('\n')
+    .map(line => line.trim())
+    .filter(Boolean)
+    .map(line => {
+      // Format: <job-id> <user> <size> <submitted date...>
+      const [id, user, size, ...rest] = line.split(/\s+/);
+      return {
+        id,
+        user,
+        size,
+        submitted: rest.join(' '),
+        state: id === activeJobId ? 'running' : 'pending',
+      };
+    });
+}
+
+module.exports = { listPrinters, getDefaultPrinter, printerExists, getPrinterStatus, listJobs };

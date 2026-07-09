@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ZPL Print Service</title>
+  <style>
+    :root {
+      --bg: #f5f6f8; --card: #ffffff; --text: #1a1d21; --muted: #6b7280;
+      --border: #e5e7eb; --ok: #16a34a; --ok-bg: #dcfce7;
+      --warn: #d97706; --warn-bg: #fef3c7; --err: #dc2626; --err-bg: #fee2e2;
+      --accent: #2563eb;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0f1115; --card: #191c22; --text: #e6e8eb; --muted: #9aa1ab;
+        --border: #2a2e37; --ok: #4ade80; --ok-bg: #14331f;
+        --warn: #fbbf24; --warn-bg: #3a2e0a; --err: #f87171; --err-bg: #3a1414;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; background: var(--bg); color: var(--text);
+      font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      padding: 32px 16px;
+    }
+    .wrap { max-width: 760px; margin: 0 auto; }
+    header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 24px; flex-wrap: wrap; }
+    h1 { font-size: 20px; margin: 0; }
+    h2 { font-size: 14px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 0 0 12px; }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 20px; margin-bottom: 20px; }
+    .pill { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 600; padding: 5px 12px; border-radius: 999px; }
+    .pill.ok { background: var(--ok-bg); color: var(--ok); }
+    .pill.err { background: var(--err-bg); color: var(--err); }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+    .dot.live { animation: pulse 1.6s ease-in-out infinite; }
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+    .row { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+    .row:last-child { border-bottom: none; }
+    .row .k { color: var(--muted); }
+    .row .v { font-weight: 500; text-align: right; word-break: break-all; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--border); font-size: 14px; }
+    th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+    tr:last-child td { border-bottom: none; }
+    .badge { font-size: 12px; font-weight: 600; padding: 3px 9px; border-radius: 6px; white-space: nowrap; }
+    .badge.running { background: var(--ok-bg); color: var(--ok); }
+    .badge.pending { background: var(--warn-bg); color: var(--warn); }
+    .empty { color: var(--muted); text-align: center; padding: 24px 0; }
+    .foot { color: var(--muted); font-size: 13px; text-align: center; margin-top: 8px; }
+    .table-wrap { overflow-x: auto; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>ZPL Print Service</h1>
+      <span id="service" class="pill ok"><span class="dot live"></span> Running</span>
+    </header>
+
+    <div class="card">
+      <h2>Printer</h2>
+      <div class="row"><span class="k">Name</span><span class="v" id="printer-name">—</span></div>
+      <div class="row"><span class="k">State</span><span class="v" id="printer-state">—</span></div>
+    </div>
+
+    <div class="card">
+      <h2>Print Jobs <span id="job-count" style="color:var(--muted);font-weight:400"></span></h2>
+      <div class="table-wrap">
+        <table id="jobs-table" hidden>
+          <thead>
+            <tr><th>Job ID</th><th>User</th><th>Size</th><th>Submitted</th><th>State</th></tr>
+          </thead>
+          <tbody id="jobs-body"></tbody>
+        </table>
+      </div>
+      <div id="jobs-empty" class="empty">No jobs running or pending.</div>
+    </div>
+
+    <div class="foot" id="foot">Updating…</div>
+  </div>
+
+  <script>
+    const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
+
+    async function refresh() {
+      const service = document.getElementById('service');
+      try {
+        const res = await fetch('/status', { cache: 'no-store' });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const data = await res.json();
+
+        service.className = 'pill ok';
+        service.innerHTML = '<span class="dot live"></span> Running';
+
+        document.getElementById('printer-name').textContent = data.printer.name || '—';
+        document.getElementById('printer-state').textContent =
+          (data.printer.available ? '' : '⚠ unavailable — ') + (data.printer.state || 'unknown');
+
+        const jobs = data.jobs || [];
+        const table = document.getElementById('jobs-table');
+        const empty = document.getElementById('jobs-empty');
+        const count = document.getElementById('job-count');
+        count.textContent = jobs.length ? '(' + jobs.length + ')' : '';
+
+        if (jobs.length) {
+          document.getElementById('jobs-body').innerHTML = jobs.map(j =>
+            '<tr><td>' + esc(j.id) + '</td><td>' + esc(j.user) + '</td><td>' + esc(j.size) +
+            '</td><td>' + esc(j.submitted) + '</td><td><span class="badge ' + esc(j.state) + '">' +
+            esc(j.state) + '</span></td></tr>').join('');
+          table.hidden = false; empty.hidden = true;
+        } else {
+          table.hidden = true; empty.hidden = false;
+        }
+
+        document.getElementById('foot').textContent = 'Last updated ' + new Date().toLocaleTimeString();
+      } catch (err) {
+        service.className = 'pill err';
+        service.innerHTML = '<span class="dot"></span> Unreachable';
+        document.getElementById('foot').textContent = 'Could not reach service — ' + err.message;
+      }
+    }
+
+    refresh();
+    setInterval(refresh, 3000);
+  </script>
+</body>
+</html>
