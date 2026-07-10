@@ -19,11 +19,18 @@ if command -v gtk-update-icon-cache >/dev/null 2>&1; then
   gtk-update-icon-cache -q -f /usr/share/icons/hicolor || true
 fi
 
+# Best-effort: open the setup page now for any logged-in graphical user.
+# (The autostart hook also handles this on the next login.)
+for udir in /run/user/*; do
+  [ -d "$udir" ] || continue
+  uid="$(basename "$udir")"
+  uname="$(id -nu "$uid" 2>/dev/null)" || continue
+  su "$uname" -c "DISPLAY=:0 XDG_RUNTIME_DIR=$udir DBUS_SESSION_BUS_ADDRESS=unix:path=$udir/bus zplexpress-firstrun" >/dev/null 2>&1 &
+done
+
 echo ""
-echo "zplexpress installed."
-echo "  - Dashboard:  http://<this-host>:3000/"
-echo "  - Select a printer from the dashboard, or run: sudo zplexpress setup"
-echo "  - Logs:       sudo journalctl -u zpl.service -f"
+echo "zplexpress installed. The setup page opens automatically;"
+echo "you can also open it any time from: Applications > ZPL Print Service"
 echo ""
 
 exit 0
