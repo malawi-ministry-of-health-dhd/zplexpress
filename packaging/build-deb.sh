@@ -31,17 +31,23 @@ cp main.js config.js printers.js setup.js dashboard.html \
 # Bundle production dependencies (no dev deps, no native modules remain).
 ( cd "$APP_DIR" && npm ci --omit=dev --no-audit --no-fund )
 
-# --- CLI wrapper + GUI launcher --------------------------------------------
+# --- CLI wrapper + GUI launchers -------------------------------------------
 mkdir -p "${STAGE}/usr/bin"
 cp packaging/zplexpress "${STAGE}/usr/bin/zplexpress"
 cp packaging/zplexpress-open "${STAGE}/usr/bin/zplexpress-open"
-chmod 0755 "${STAGE}/usr/bin/zplexpress" "${STAGE}/usr/bin/zplexpress-open"
+cp packaging/zplexpress-firstrun "${STAGE}/usr/bin/zplexpress-firstrun"
+chmod 0755 "${STAGE}/usr/bin/zplexpress" \
+  "${STAGE}/usr/bin/zplexpress-open" "${STAGE}/usr/bin/zplexpress-firstrun"
 
 # Desktop entry + icon (so it appears in the Applications menu).
 mkdir -p "${STAGE}/usr/share/applications"
 cp packaging/zplexpress.desktop "${STAGE}/usr/share/applications/zplexpress.desktop"
 mkdir -p "${STAGE}/usr/share/icons/hicolor/scalable/apps"
 cp packaging/zplexpress.svg "${STAGE}/usr/share/icons/hicolor/scalable/apps/zplexpress.svg"
+
+# Autostart hook: opens the setup page on login until a printer is configured.
+mkdir -p "${STAGE}/etc/xdg/autostart"
+cp packaging/zplexpress-firstrun.desktop "${STAGE}/etc/xdg/autostart/zplexpress-firstrun.desktop"
 
 # --- systemd unit -----------------------------------------------------------
 mkdir -p "${STAGE}/lib/systemd/system"

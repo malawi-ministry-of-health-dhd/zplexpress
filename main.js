@@ -1,5 +1,6 @@
 require('dotenv').config();
 const path = require('path');
+const net = require('net');
 const express = require('express');
 const bodyParser = require('body-parser');
 const { exec } = require('child_process');
@@ -8,6 +9,25 @@ const cors = require('cors');
 const { loadConfig, saveConfig } = require('./config');
 const { listPrinters, printerExists, getPrinterStatus, listJobs } = require('./printers');
 const { runWizard } = require('./setup');
+
+// Resolve whether a TCP port is free to bind.
+function isPortFree(port) {
+  return new Promise(resolve => {
+    const tester = net.createServer()
+      .once('error', () => resolve(false))
+      .once('listening', () => tester.close(() => resolve(true)))
+      .listen(port, '0.0.0.0');
+  });
+}
+
+// Find an available port, starting at `desired` and scanning upward.
+// Returns 0 (OS-assigned) if none is free in the scanned range.
+async function findAvailablePort(desired, maxTries = 50) {
+  for (let p = desired; p < desired + maxTries && p <= 65535; p++) {
+    if (await isPortFree(p)) return p;
+  }
+  return 0;
+}
 
 async function main() {
   // `node main.js setup` launches the interactive configuration wizard.
@@ -30,17 +50,17 @@ async function main() {
     }
   }
 
-  startServer(config);
+  await startServer(config);
 }
 
-function startServer(config) {
+async function startServer(config) {
   const app = express();
   // Mutable so they can be changed at runtime from the dashboard.
   let printerName = config.printerName;
   let currentPort = config.port;
   let httpServer;
 
-  console.log(`Starting server on port ${currentPort} (printer: ${printerName})`);
+  console.log(`Starting server (preferred port: ${currentPort}, printer: ${printerName})`);
 
   app.use(cors());
   app.use(bodyParser.json());
@@ -158,9 +178,24 @@ function startServer(config) {
     printProcess.stdin.end();
   });
 
-  httpServer = app.listen(currentPort, () => {
-    console.log(`Server is running on http://localhost:${currentPort}`);
+  // If the preferred port is busy, fall back to a free one so the service
+  // still starts. Persist whatever we actually bind to, so the dashboard,
+  // the desktop launcher, and the next restart all agree on the port.
+  const desiredPort = currentPort;
+  const chosenPort = await findAvailablePort(desiredPort);
+
+  await new Promise((resolve, reject) => {
+    httpServer = app.listen(chosenPort);
+    httpServer.once('listening', resolve);
+    httpServer.once('error', reject);
   });
+
+  currentPort = httpServer.address().port;
+  if (currentPort !== desiredPort) {
+    console.warn(`Port ${desiredPort} was busy — using free port ${currentPort} instead.`);
+    saveConfig({ printerName, port: currentPort });
+  }
+  console.log(`Server is running on http://localhost:${currentPort}`);
 }
 
 main().catch(err => {
