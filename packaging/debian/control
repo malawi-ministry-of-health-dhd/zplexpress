@@ -3,7 +3,7 @@ Version: __VERSION__
 Section: utils
 Priority: optional
 Architecture: all
-Depends: nodejs (>= 18.0.0), cups, cups-client
+Depends: nodejs (>= 18.0.0), cups, cups-client, xdg-utils
 Maintainer: Louis Nyirongo <louisnyirongo@lukeinternational.no>
 Homepage: https://github.com/malawi-ministry-of-health-dhd/zplexpress
 Description: ZPL printing service with web dashboard

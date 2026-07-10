@@ -1,5 +1,5 @@
 #!/bin/sh
-# Open the ZPL dashboard in the default browser, using the configured port.
+# Open the ZPL dashboard in a browser, using the configured port.
 CFG="${ZPL_CONFIG:-/etc/zplexpress/config.json}"
 
 PORT=""
@@ -8,4 +8,27 @@ if [ -f "$CFG" ]; then
 fi
 [ -z "$PORT" ] && PORT=3000
 
-xdg-open "http://localhost:${PORT}/" >/dev/null 2>&1 &
+URL="http://localhost:${PORT}/"
+
+# Try openers in order of preference; fall back to known browsers.
+if command -v xdg-open >/dev/null 2>&1; then
+  exec xdg-open "$URL"
+elif command -v gio >/dev/null 2>&1; then
+  exec gio open "$URL"
+elif command -v sensible-browser >/dev/null 2>&1; then
+  exec sensible-browser "$URL"
+elif [ "$(uname)" = "Darwin" ] && command -v open >/dev/null 2>&1; then
+  exec open "$URL"
+else
+  for b in x-www-browser firefox chromium chromium-browser google-chrome brave-browser; do
+    if command -v "$b" >/dev/null 2>&1; then
+      exec "$b" "$URL"
+    fi
+  done
+  # Nothing to open with — tell the user where to go.
+  if command -v notify-send >/dev/null 2>&1; then
+    notify-send "ZPL Print Service" "Open $URL in your web browser."
+  fi
+  echo "Open $URL in your web browser." >&2
+  exit 1
+fi
