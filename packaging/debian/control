@@ -1,0 +1,12 @@
+Package: zplexpress
+Version: __VERSION__
+Section: utils
+Priority: optional
+Architecture: all
+Depends: nodejs (>= 18.0.0), cups, cups-client
+Maintainer: Louis Nyirongo <louisnyirongo@lukeinternational.no>
+Homepage: https://github.com/malawi-ministry-of-health-dhd/zplexpress
+Description: ZPL printing service with web dashboard
+ A Node.js service that receives ZPL (Zebra Programming Language) over HTTP
+ and prints to a CUPS printer. Includes a web dashboard for viewing service
+ status, monitoring print jobs, and selecting the active printer.

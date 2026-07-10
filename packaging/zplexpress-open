@@ -1,0 +1,11 @@
+#!/bin/sh
+# Open the ZPL dashboard in the default browser, using the configured port.
+CFG="${ZPL_CONFIG:-/etc/zplexpress/config.json}"
+
+PORT=""
+if [ -f "$CFG" ]; then
+  PORT=$(sed -n 's/.*"port"[[:space:]]*:[[:space:]]*\([0-9]\{1,\}\).*/\1/p' "$CFG" | head -n1)
+fi
+[ -z "$PORT" ] && PORT=3000
+
+xdg-open "http://localhost:${PORT}/" >/dev/null 2>&1 &

@@ -2,11 +2,51 @@
 
 A Node.js service for handling ZPL (Zebra Programming Language) label printing.
 
-## Prerequisites
+## Install
+
+Download the latest `zplexpress_<version>_all.deb` from the
+[GitHub Releases](https://github.com/malawi-ministry-of-health-dhd/zplexpress/releases)
+page, then install it either way (both pull in `nodejs` and `cups`):
+
+**GUI:** double-click the downloaded `.deb` — it opens in the desktop's
+software installer (GNOME Software / GDebi / Discover); click **Install**.
+
+**Terminal:**
+
+```bash
+VER=1.0.0
+curl -fsSLO https://github.com/malawi-ministry-of-health-dhd/zplexpress/releases/download/v$VER/zplexpress_${VER}_all.deb
+sudo apt install ./zplexpress_${VER}_all.deb
+```
+
+Either way this installs the app to `/opt/zplexpress`, registers a
+`zpl.service` systemd unit (enabled + started automatically), adds a
+`zplexpress` command, and puts a **ZPL Print Service** entry in the
+Applications menu.
+
+### Configure
+
+Everything can be configured from the browser dashboard — no terminal needed:
+
+1. Open **Applications → ZPL Print Service** (or browse to
+   `http://<this-host>:3000/`).
+2. Pick the **printer** from the dropdown.
+3. Set the **port** if you want to change it (the page reloads on the new port).
+
+Prefer the terminal? Run `sudo zplexpress setup` for the interactive wizard.
+The service listens on port **3000** by default.
+
+**Upgrading:** download the newer `.deb` and `sudo apt install ./…deb` again.
+Your printer/port config in `/etc/zplexpress/config.json` is preserved.
+**Removing:** `sudo apt remove zplexpress` (or `apt purge` to also delete config).
+
+## Development / manual setup
+
+### Prerequisites
 
 - Node.js 18 or higher
 
-## Installation & Setup
+### From source
 
 1. **Clone the repository** (if applicable)
    ```bash

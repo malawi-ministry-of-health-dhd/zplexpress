@@ -1,0 +1,29 @@
+#!/bin/sh
+set -e
+
+# Config directory for the runtime-managed config.json.
+mkdir -p /etc/zplexpress
+
+# Enable and (re)start the service on systemd systems.
+if [ -d /run/systemd/system ]; then
+  systemctl daemon-reload || true
+  systemctl enable zpl.service || true
+  systemctl restart zpl.service || true
+fi
+
+# Refresh desktop menu + icon cache so the launcher shows up immediately.
+if command -v update-desktop-database >/dev/null 2>&1; then
+  update-desktop-database -q /usr/share/applications || true
+fi
+if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+  gtk-update-icon-cache -q -f /usr/share/icons/hicolor || true
+fi
+
+echo ""
+echo "zplexpress installed."
+echo "  - Dashboard:  http://<this-host>:3000/"
+echo "  - Select a printer from the dashboard, or run: sudo zplexpress setup"
+echo "  - Logs:       sudo journalctl -u zpl.service -f"
+echo ""
+
+exit 0

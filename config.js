@@ -1,7 +1,9 @@
 const fs = require('fs');
 const path = require('path');
 
-const CONFIG_PATH = path.join(__dirname, 'config.json');
+// Config location is overridable via ZPL_CONFIG (used by the packaged
+// install, which stores config in /etc/zplexpress/config.json).
+const CONFIG_PATH = process.env.ZPL_CONFIG || path.join(__dirname, 'config.json');
 
 // Load saved configuration, falling back to environment variables.
 function loadConfig() {
@@ -14,7 +16,7 @@ function loadConfig() {
 
   return {
     printerName: saved.printerName ?? process.env.PRINTER_NAME ?? null,
-    port: saved.port ?? Number(process.env.PORT) ?? 3000,
+    port: saved.port ?? (process.env.PORT ? Number(process.env.PORT) : 3000),
   };
 }
 

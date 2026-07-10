@@ -1,0 +1,50 @@
+name: Build and release .deb
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-deb:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build .deb
+        run: |
+          chmod +x packaging/build-deb.sh
+          packaging/build-deb.sh
+
+      - name: Generate checksum
+        run: |
+          cd dist
+          sha256sum *.deb > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: zplexpress-deb
+          path: dist/*
+
+      - name: Publish to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: zplexpress ${{ github.ref_name }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            dist/*.deb
+            dist/SHA256SUMS.txt

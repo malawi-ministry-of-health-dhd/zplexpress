@@ -18,10 +18,16 @@ async function main() {
 
   let config = loadConfig();
 
-  // Auto-fallback: if no printer has been configured yet, run the wizard once.
+  // Auto-fallback: if no printer is configured, run the wizard — but only when
+  // attached to a terminal. Under systemd (no TTY) start anyway; the printer
+  // can be selected from the dashboard or via `zplexpress setup`.
   if (!config.printerName) {
-    console.log('No printer configured yet — starting setup.');
-    config = await runWizard();
+    if (process.stdin.isTTY && process.stdout.isTTY) {
+      console.log('No printer configured yet — starting setup.');
+      config = await runWizard();
+    } else {
+      console.warn('No printer configured. Select one from the dashboard at "/" or run `zplexpress setup`.');
+    }
   }
 
   startServer(config);
@@ -29,11 +35,12 @@ async function main() {
 
 function startServer(config) {
   const app = express();
-  const { port } = config;
-  // Mutable so it can be changed at runtime via POST /printer.
+  // Mutable so they can be changed at runtime from the dashboard.
   let printerName = config.printerName;
+  let currentPort = config.port;
+  let httpServer;
 
-  console.log(`Starting server on port ${port} (printer: ${printerName})`);
+  console.log(`Starting server on port ${currentPort} (printer: ${printerName})`);
 
   app.use(cors());
   app.use(bodyParser.json());
@@ -51,6 +58,7 @@ function startServer(config) {
       const jobs = await listJobs(printer.activeJobId);
       res.status(200).json({
         service: 'running',
+        port: currentPort,
         printer: { name: printerName, available: printer.available, state: printer.state },
         jobs,
       });
@@ -85,9 +93,36 @@ function startServer(config) {
     }
 
     printerName = name;
-    saveConfig({ printerName: name, port });
+    saveConfig({ printerName: name, port: currentPort });
     console.log(`Active printer changed to: ${name}`);
     res.status(200).json({ message: `Active printer set to ${name}`, printerName: name });
+  });
+
+  // Change the listening port at runtime and persist it to config.json.
+  // Binds the new port before closing the old one, so there is no downtime.
+  app.post('/port', (req, res) => {
+    const newPort = Number(req.body.port);
+
+    if (!Number.isInteger(newPort) || newPort < 1 || newPort > 65535) {
+      return res.status(400).json({ error: 'Port must be an integer between 1 and 65535' });
+    }
+    if (newPort === currentPort) {
+      return res.status(200).json({ message: 'Port unchanged', port: currentPort });
+    }
+
+    const newServer = app.listen(newPort);
+    newServer.once('listening', () => {
+      const oldServer = httpServer;
+      httpServer = newServer;
+      currentPort = newPort;
+      saveConfig({ printerName, port: newPort });
+      console.log(`Port changed to ${newPort}`);
+      oldServer.close();
+      res.status(200).json({ message: `Port changed to ${newPort}`, port: newPort });
+    });
+    newServer.once('error', err => {
+      res.status(500).json({ error: `Could not bind port ${newPort}: ${err.code || err.message}` });
+    });
   });
 
   app.post('/print', async (req, res) => {
@@ -123,8 +158,8 @@ function startServer(config) {
     printProcess.stdin.end();
   });
 
-  app.listen(port, () => {
-    console.log(`Server is running on http://localhost:${port}`);
+  httpServer = app.listen(currentPort, () => {
+    console.log(`Server is running on http://localhost:${currentPort}`);
   });
 }
 

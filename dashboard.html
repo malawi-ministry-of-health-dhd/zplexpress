@@ -47,8 +47,11 @@
     .badge.running { background: var(--ok-bg); color: var(--ok); }
     .badge.pending { background: var(--warn-bg); color: var(--warn); }
     .empty { color: var(--muted); text-align: center; padding: 24px 0; }
-    select { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; max-width: 100%; cursor: pointer; }
-    select:disabled { opacity: .6; cursor: default; }
+    select, input { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; max-width: 100%; }
+    select { cursor: pointer; }
+    select:disabled, input:disabled, button:disabled { opacity: .6; cursor: default; }
+    input[type=number] { width: 100px; }
+    button { font: inherit; font-weight: 600; color: #fff; background: var(--accent); border: none; border-radius: 8px; padding: 7px 14px; margin-left: 6px; cursor: pointer; }
     .msg { margin-top: 12px; font-size: 13px; padding: 8px 12px; border-radius: 8px; }
     .msg.ok { background: var(--ok-bg); color: var(--ok); }
     .msg.err { background: var(--err-bg); color: var(--err); }
@@ -71,6 +74,18 @@
       </div>
       <div class="row"><span class="k">State</span><span class="v" id="printer-state">—</span></div>
       <div id="printer-msg" class="msg" hidden></div>
+    </div>
+
+    <div class="card">
+      <h2>Server</h2>
+      <div class="row">
+        <span class="k">Port</span>
+        <span class="v">
+          <input id="port-input" type="number" min="1" max="65535" inputmode="numeric">
+          <button id="port-save">Save</button>
+        </span>
+      </div>
+      <div id="port-msg" class="msg" hidden></div>
     </div>
 
     <div class="card">
@@ -134,6 +149,39 @@
       }
     });
 
+    // Save + apply a new server port, then follow the browser to the new port.
+    const portInput = document.getElementById('port-input');
+    const portSave = document.getElementById('port-save');
+    const portMsg = document.getElementById('port-msg');
+    let portInitialized = false;
+
+    portSave.addEventListener('click', async () => {
+      const newPort = Number(portInput.value);
+      portSave.disabled = true; portInput.disabled = true;
+      const setPortMsg = (t, ok) => { portMsg.textContent = t; portMsg.className = 'msg ' + (ok ? 'ok' : 'err'); portMsg.hidden = false; };
+      try {
+        const res = await fetch('/port', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ port: newPort }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to change port');
+        if (data.port === Number(location.port || 80)) {
+          setPortMsg('Port unchanged.', true);
+        } else {
+          setPortMsg('Port changed to ' + data.port + ' — reloading…', true);
+          setTimeout(() => {
+            location.href = location.protocol + '//' + location.hostname + ':' + data.port + '/';
+          }, 900);
+          return; // leave controls disabled while navigating
+        }
+      } catch (err) {
+        setPortMsg('Error: ' + err.message, false);
+      }
+      portSave.disabled = false; portInput.disabled = false;
+    });
+
     async function refresh() {
       const service = document.getElementById('service');
       try {
@@ -151,6 +199,12 @@
         }
         document.getElementById('printer-state').textContent =
           (data.printer.available ? '' : '⚠ unavailable — ') + (data.printer.state || 'unknown');
+
+        // Seed the port field once (don't overwrite while the user edits it).
+        if (!portInitialized && data.port != null && document.activeElement !== portInput) {
+          portInput.value = data.port;
+          portInitialized = true;
+        }
 
         const jobs = data.jobs || [];
         const table = document.getElementById('jobs-table');

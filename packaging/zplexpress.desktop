@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=ZPL Print Service
+GenericName=Label Printing Dashboard
+Comment=Open the ZPL print service dashboard to view status and configure the printer
+Exec=zplexpress-open
+Icon=zplexpress
+Terminal=false
+Categories=Utility;System;Printing;
+Keywords=zpl;printer;zebra;label;print;
