@@ -3,11 +3,18 @@ const path = require('path');
 const net = require('net');
 const express = require('express');
 const bodyParser = require('body-parser');
-const { exec } = require('child_process');
 const cors = require('cors');
 
 const { loadConfig, saveConfig } = require('./config');
-const { listPrinters, printerExists, getPrinterStatus, listJobs } = require('./printers');
+const {
+  findOcomPrinter,
+  getPrinterStatus,
+  isOcomPrinter,
+  listJobs,
+  listPrinters,
+  printerExists,
+  submitZpl,
+} = require('./printers');
 const { runWizard } = require('./setup');
 
 // Resolve whether a TCP port is free to bind.
@@ -38,6 +45,23 @@ async function main() {
 
   let config = loadConfig();
 
+  // Prefer the queue installed by the OCOM driver when there is no usable
+  // saved selection. This also repairs an old config that points to a queue
+  // which has since been removed.
+  try {
+    const configuredQueueExists = config.printerName && await printerExists(config.printerName);
+    if (!configuredQueueExists) {
+      const ocomPrinter = await findOcomPrinter();
+      if (ocomPrinter) {
+        config = { ...config, printerName: ocomPrinter };
+        saveConfig(config);
+        console.log(`Automatically selected OCOM printer: ${ocomPrinter}`);
+      }
+    }
+  } catch (error) {
+    console.warn(`Could not auto-detect the OCOM printer: ${error.message}`);
+  }
+
   // Auto-fallback: if no printer is configured, run the wizard — but only when
   // attached to a terminal. Under systemd (no TTY) start anyway; the printer
   // can be selected from the dashboard or via `zplexpress setup`.
@@ -62,6 +86,20 @@ async function startServer(config) {
 
   console.log(`Starting server (preferred port: ${currentPort}, printer: ${printerName})`);
 
+  // The driver may create its queue after this service starts. Adopt it as
+  // soon as it appears if no valid active queue is currently configured.
+  async function ensurePrinterSelection() {
+    if (printerName && await printerExists(printerName)) return printerName;
+
+    const ocomPrinter = await findOcomPrinter();
+    if (ocomPrinter) {
+      printerName = ocomPrinter;
+      saveConfig({ printerName, port: currentPort });
+      console.log(`Detected and selected OCOM printer: ${printerName}`);
+    }
+    return printerName;
+  }
+
   app.use(cors());
   app.use(bodyParser.json());
   app.use(bodyParser.urlencoded({ extended: true }));
@@ -74,12 +112,13 @@ async function startServer(config) {
   // Service + printer + job status as JSON (polled by the dashboard).
   app.get('/status', async (req, res) => {
     try {
+      await ensurePrinterSelection();
       const printer = await getPrinterStatus(printerName);
       const jobs = await listJobs(printer.activeJobId);
       res.status(200).json({
         service: 'running',
         port: currentPort,
-        printer: { name: printerName, available: printer.available, state: printer.state },
+        printer: { name: printerName, ...printer },
         jobs,
       });
     } catch (err) {
@@ -94,8 +133,15 @@ async function startServer(config) {
 
   app.get('/printers', async (req, res) => {
     try {
+      await ensurePrinterSelection();
       const printers = await listPrinters();
-      res.status(200).json({ configured: printerName, printers });
+      res.status(200).json({
+        configured: printerName,
+        printers: printers.map(printer => ({
+          ...printer,
+          isOcom: isOcomPrinter(printer.name),
+        })),
+      });
     } catch (err) {
       res.status(500).json({ error: 'Could not list printers' });
     }
@@ -108,14 +154,20 @@ async function startServer(config) {
     if (!name || typeof name !== 'string') {
       return res.status(400).json({ error: 'printerName is required' });
     }
-    if (!(await printerExists(name))) {
-      return res.status(400).json({ error: `Printer "${name}" is not available` });
-    }
 
-    printerName = name;
-    saveConfig({ printerName: name, port: currentPort });
-    console.log(`Active printer changed to: ${name}`);
-    res.status(200).json({ message: `Active printer set to ${name}`, printerName: name });
+    try {
+      if (!(await printerExists(name))) {
+        return res.status(400).json({ error: `CUPS queue "${name}" is not installed` });
+      }
+
+      printerName = name;
+      saveConfig({ printerName: name, port: currentPort });
+      console.log(`Active printer changed to: ${name}`);
+      res.status(200).json({ message: `Active printer set to ${name}`, printerName: name });
+    } catch (error) {
+      console.error(`Could not select printer: ${error.message}`);
+      res.status(500).json({ error: 'Could not read printers from CUPS' });
+    }
   });
 
   // Change the listening port at runtime and persist it to config.json.
@@ -152,30 +204,47 @@ async function startServer(config) {
       return res.status(400).json({ error: 'ZPL data is required in the request body' });
     }
 
-    if (!(await printerExists(printerName))) {
-      console.error(`Configured printer "${printerName}" is not available.`);
-      return res.status(400).json({
-        error: `Configured printer "${printerName}" is not available. Run \`node main.js setup\` to reconfigure.`,
-      });
-    }
+    try {
+      await ensurePrinterSelection();
+      const printer = await getPrinterStatus(printerName);
 
-    console.log(`Using printer: ${printerName}`);
-
-    const printProcess = exec(`lp -d ${printerName} -o raw`, (error, stdout, stderr) => {
-      if (error) {
-        console.error(`Print error: ${error}`);
-        return res.status(500).json({ error: 'Failed to print label' });
+      if (!printer.queueAvailable) {
+        return res.status(503).json({
+          error: printerName
+            ? `The CUPS queue "${printerName}" is not installed. Install the OCOM driver or select another printer.`
+            : 'No printer is configured. Install the OCOM driver or select a printer from the dashboard.',
+          printer,
+        });
       }
 
-      console.log(`Print stdout: ${stdout}`);
-      if (stderr) console.error(`Print stderr: ${stderr}`);
+      if (!printer.enabled) {
+        return res.status(503).json({
+          error: `Printer "${printerName}" is disabled in CUPS. Enable it before printing.`,
+          printer,
+        });
+      }
 
-      res.status(200).json({ message: `Label sent to printer: ${printerName}` });
-    });
+      if (printer.connected === false) {
+        const printerType = printer.isOcom ? 'OCOM printer' : 'USB printer';
+        return res.status(503).json({
+          error: `${printerType} "${printerName}" is unplugged or powered off. Connect it by USB and try again.`,
+          printer,
+        });
+      }
 
-    // Send ZPL via stdin to avoid shell quoting issues.
-    printProcess.stdin.write(zpl);
-    printProcess.stdin.end();
+      const result = await submitZpl(printerName, zpl, printer.isOcom);
+      console.log(
+        `Submitted ${result.jobId || 'print job'} to ${printerName} using ${printer.driver}`,
+      );
+      res.status(200).json({
+        message: `Label sent to printer: ${printerName}`,
+        jobId: result.jobId,
+        driver: printer.driver,
+      });
+    } catch (error) {
+      console.error(`Print error: ${error.message}`);
+      res.status(500).json({ error: `Failed to print label: ${error.message}` });
+    }
   });
 
   // If the preferred port is busy, fall back to a free one so the service
