@@ -1,5 +1,10 @@
 const { select, input } = require('@inquirer/prompts');
-const { listPrinters, getDefaultPrinter } = require('./printers');
+const {
+  OCOM_QUEUE,
+  getDefaultPrinter,
+  getPrinterStatus,
+  listPrinters,
+} = require('./printers');
 const { loadConfig, saveConfig } = require('./config');
 
 // Interactive terminal wizard: detect connected printers, let the user pick
@@ -25,15 +30,19 @@ async function runWizard() {
   }
 
   const defaultPrinter = await getDefaultPrinter();
-  const preselect = current.printerName ?? defaultPrinter;
+  const preselect = current.printerName
+    ?? (printers.some(printer => printer.name === OCOM_QUEUE) ? OCOM_QUEUE : defaultPrinter);
+  const statuses = await Promise.all(printers.map(printer => getPrinterStatus(printer.name)));
 
   console.log(`Found ${printers.length} printer(s).\n`);
 
   const printerName = await select({
     message: 'Select the printer to use:',
-    choices: printers.map(p => ({
-      name: `${p.name}  (${p.status})`,
-      value: p.name,
+    choices: printers.map((printer, index) => ({
+      name: `${printer.name}${statuses[index].isOcom ? ' [OCOM ZPL-to-TSPL]' : ''}`
+        + `${statuses[index].connected === false ? ' [USB unplugged]' : ''}`
+        + `  (${printer.status})`,
+      value: printer.name,
     })),
     default: printers.some(p => p.name === preselect) ? preselect : undefined,
   });

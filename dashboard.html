@@ -39,6 +39,8 @@
     .row:last-child { border-bottom: none; }
     .row .k { color: var(--muted); }
     .row .v { font-weight: 500; text-align: right; word-break: break-all; }
+    .row .v.ok { color: var(--ok); }
+    .row .v.err { color: var(--err); }
     table { width: 100%; border-collapse: collapse; }
     th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--border); font-size: 14px; }
     th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
@@ -73,6 +75,9 @@
         <span class="v"><select id="printer-select"><option>Loading…</option></select></span>
       </div>
       <div class="row"><span class="k">State</span><span class="v" id="printer-state">—</span></div>
+      <div class="row"><span class="k">Connection</span><span class="v" id="printer-connection">—</span></div>
+      <div class="row"><span class="k">Print path</span><span class="v" id="printer-driver">—</span></div>
+      <div class="row"><span class="k">Device</span><span class="v" id="printer-device">—</span></div>
       <div id="printer-msg" class="msg" hidden></div>
     </div>
 
@@ -121,7 +126,12 @@
         const res = await fetch('/printers', { cache: 'no-store' });
         const data = await res.json();
         select.innerHTML = data.printers
-          .map(p => '<option value="' + esc(p.name) + '">' + esc(p.name) + '</option>').join('');
+          .map(p => '<option value="' + esc(p.name) + '">' + esc(p.name) +
+            (p.isOcom ? ' — OCOM driver' : '') + '</option>').join('');
+        if (!data.printers.length) {
+          select.innerHTML = '<option value="">No CUPS printers installed</option>';
+          select.disabled = true;
+        }
         if (data.configured) select.value = data.configured;
       } catch (err) {
         select.innerHTML = '<option>Could not load printers</option>';
@@ -197,8 +207,25 @@
         if (data.printer.name && document.activeElement !== select && !select.disabled) {
           select.value = data.printer.name;
         }
+        const printer = data.printer || {};
         document.getElementById('printer-state').textContent =
-          (data.printer.available ? '' : '⚠ unavailable — ') + (data.printer.state || 'unknown');
+          (printer.available ? '' : '⚠ unavailable — ') + (printer.state || 'unknown');
+
+        const connection = document.getElementById('printer-connection');
+        if (printer.connected === true) {
+          connection.textContent = 'USB connected';
+          connection.className = 'v ok';
+        } else if (printer.connected === false) {
+          connection.textContent = printer.queueAvailable
+            ? 'USB unplugged or powered off'
+            : 'Printer queue not installed';
+          connection.className = 'v err';
+        } else {
+          connection.textContent = printer.reason || 'Managed by CUPS';
+          connection.className = 'v';
+        }
+        document.getElementById('printer-driver').textContent = printer.driver || '—';
+        document.getElementById('printer-device').textContent = printer.deviceUri || '—';
 
         // Seed the port field once (don't overwrite while the user edits it).
         if (!portInitialized && data.port != null && document.activeElement !== portInput) {
