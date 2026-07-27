@@ -5,7 +5,7 @@ const {
   getPrinterStatus,
   listPrinters,
 } = require('./printers');
-const { loadConfig, saveConfig } = require('./config');
+const { RENDER_MODES, loadConfig, saveConfig } = require('./config');
 
 // Interactive terminal wizard: detect connected printers, let the user pick
 // one and set the server port, then persist the choice to config.json.
@@ -58,12 +58,28 @@ async function runWizard() {
     },
   });
 
-  const config = { printerName, port: Number(portInput) };
+  const renderMode = await select({
+    message: 'OCOM ZPL rendering mode:',
+    choices: [
+      {
+        name: 'PDFRaster — local ZPL-to-PDF rendering (recommended)',
+        value: RENDER_MODES.PDF_RASTER,
+      },
+      {
+        name: 'NativeTSPL — direct ZPL-to-TSPL conversion',
+        value: RENDER_MODES.NATIVE_TSPL,
+      },
+    ],
+    default: current.renderMode,
+  });
+
+  const config = { printerName, port: Number(portInput), renderMode };
   saveConfig(config);
 
   console.log(`\nSaved configuration:`);
   console.log(`  Printer: ${config.printerName}`);
   console.log(`  Port:    ${config.port}\n`);
+  console.log(`  Renderer: ${config.renderMode}\n`);
 
   return config;
 }

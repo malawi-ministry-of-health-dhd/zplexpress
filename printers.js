@@ -5,6 +5,16 @@ const execFileAsync = promisify(execFile);
 
 const OCOM_QUEUE = process.env.OCOM_PRINTER_NAME || 'OCOM_Ubuntu_Driver';
 const OCOM_ZPL_FORMAT = 'application/vnd.ocom-zpl';
+const PDF_FORMAT = 'application/pdf';
+const DEFAULT_MEDIA_NAME = 'w288h108';
+const DEFAULT_MEDIA = Object.freeze({
+  pageSize: DEFAULT_MEDIA_NAME,
+  widthMm: 101.6,
+  heightMm: 38.1,
+  widthDots: 812,
+  heightDots: 305,
+  dpi: 203,
+});
 const COMMAND_OPTIONS = { encoding: 'utf8', maxBuffer: 1024 * 1024, timeout: 5000 };
 
 function commandOutput(error) {
@@ -42,6 +52,64 @@ function parseConnectedDeviceUris(stdout) {
       return match ? match[1].trim() : null;
     })
     .filter(Boolean);
+}
+
+function parseLpOptions(stdout) {
+  const options = {};
+  for (const token of String(stdout || '').trim().split(/\s+/)) {
+    const separator = token.indexOf('=');
+    if (separator > 0) {
+      options[token.slice(0, separator)] = token.slice(separator + 1);
+    }
+  }
+  return options;
+}
+
+function parsePageSize(pageSize) {
+  const value = String(pageSize || '');
+  let match = value.match(/^w(\d+(?:\.\d+)?)h(\d+(?:\.\d+)?)$/i);
+  if (match) {
+    const widthPoints = Number(match[1]);
+    const heightPoints = Number(match[2]);
+    return {
+      pageSize: value,
+      widthMm: widthPoints * 25.4 / 72,
+      heightMm: heightPoints * 25.4 / 72,
+      widthDots: Math.round(widthPoints * 203 / 72),
+      heightDots: Math.round(heightPoints * 203 / 72),
+      dpi: 203,
+    };
+  }
+
+  match = value.match(/^Custom\.(\d+(?:\.\d+)?)x(\d+(?:\.\d+)?)(mm|cm|in|pt)?$/i);
+  if (match) {
+    const units = (match[3] || 'pt').toLowerCase();
+    const scaleToMm = { mm: 1, cm: 10, in: 25.4, pt: 25.4 / 72 }[units];
+    const widthMm = Number(match[1]) * scaleToMm;
+    const heightMm = Number(match[2]) * scaleToMm;
+    return {
+      pageSize: value,
+      widthMm,
+      heightMm,
+      widthDots: Math.round(widthMm * 203 / 25.4),
+      heightDots: Math.round(heightMm * 203 / 25.4),
+      dpi: 203,
+    };
+  }
+
+  const aliases = {
+    '4x6': { widthMm: 101.6, heightMm: 152.4 },
+    '4x1.5': { widthMm: 101.6, heightMm: 38.1 },
+  };
+  const alias = aliases[value.toLowerCase()];
+  if (!alias) return null;
+  return {
+    pageSize: value,
+    ...alias,
+    widthDots: Math.round(alias.widthMm * 203 / 25.4),
+    heightDots: Math.round(alias.heightMm * 203 / 25.4),
+    dpi: 203,
+  };
 }
 
 function decodeUri(uri) {
@@ -122,6 +190,25 @@ async function getPrinterDeviceUri(name) {
     return parseDeviceUri(stdout);
   } catch (error) {
     if (/unknown destination|not found/i.test(commandOutput(error))) return null;
+    throw error;
+  }
+}
+
+async function getPrinterMedia(name) {
+  if (!name) return { ...DEFAULT_MEDIA, source: 'default' };
+
+  try {
+    const { stdout } = await execFileAsync('lpoptions', ['-p', name], COMMAND_OPTIONS);
+    const options = parseLpOptions(stdout);
+    const pageSize = options.PageSize || options.media;
+    const media = parsePageSize(pageSize);
+    return media
+      ? { ...media, source: 'cups' }
+      : { ...DEFAULT_MEDIA, source: 'default' };
+  } catch (error) {
+    if (/unknown destination|not found/i.test(commandOutput(error))) {
+      return { ...DEFAULT_MEDIA, source: 'default' };
+    }
     throw error;
   }
 }
@@ -245,14 +332,27 @@ function buildPrintArgs(printerName, useOcomDriver) {
   return args;
 }
 
-// Submit through lp without a shell. OCOM data is tagged with the custom MIME
-// type so CUPS invokes zpl_to_tspl; true Zebra queues continue to receive raw
-// ZPL.
-function submitZpl(printerName, zpl, useOcomDriver) {
+function buildPdfPrintArgs(printerName, media = DEFAULT_MEDIA, copies = 1) {
+  if (!printerName || typeof printerName !== 'string') {
+    throw new TypeError('A printer name is required');
+  }
+
+  const args = [
+    '-d', printerName,
+    '-t', 'ZPLExpress PDF label',
+    '-n', String(Math.max(1, Math.min(999, Math.round(Number(copies) || 1)))),
+    '-o', `document-format=${PDF_FORMAT}`,
+    '-o', `PageSize=${media.pageSize || DEFAULT_MEDIA_NAME}`,
+    '-o', 'fit-to-page=false',
+    '-o', 'scaling=100',
+    '-',
+  ];
+  return args;
+}
+
+function submitBuffer(args, data) {
   return new Promise((resolve, reject) => {
-    const child = spawn('lp', buildPrintArgs(printerName, useOcomDriver), {
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
+    const child = spawn('lp', args, { stdio: ['pipe', 'pipe', 'pipe'] });
     let stdout = '';
     let stderr = '';
     let stdinError = null;
@@ -273,7 +373,9 @@ function submitZpl(printerName, zpl, useOcomDriver) {
     child.once('close', code => {
       if (settled) return;
       if (code !== 0 || stdinError) {
-        const detail = stderr.trim() || (stdinError && stdinError.message) || `lp exited with status ${code}`;
+        const detail = stderr.trim()
+          || (stdinError && stdinError.message)
+          || `lp exited with status ${code}`;
         return fail(new Error(detail));
       }
 
@@ -286,8 +388,22 @@ function submitZpl(printerName, zpl, useOcomDriver) {
       });
     });
 
-    child.stdin.end(zpl);
+    child.stdin.end(data);
   });
+}
+
+// Submit through lp without a shell. OCOM data is tagged with the custom MIME
+// type so CUPS invokes zpl_to_tspl; true Zebra queues continue to receive raw
+// ZPL.
+function submitZpl(printerName, zpl, useOcomDriver) {
+  return submitBuffer(buildPrintArgs(printerName, useOcomDriver), zpl);
+}
+
+function submitPdf(printerName, pdf, media, copies = 1) {
+  if (!Buffer.isBuffer(pdf) || pdf.subarray(0, 5).toString('ascii') !== '%PDF-') {
+    return Promise.reject(new TypeError('submitPdf requires a PDF Buffer'));
+  }
+  return submitBuffer(buildPdfPrintArgs(printerName, media, copies), pdf);
 }
 
 // List queued print jobs (not yet completed) via `lpstat -o`.
@@ -319,10 +435,14 @@ async function listJobs(activeJobId = null) {
 module.exports = {
   OCOM_QUEUE,
   OCOM_ZPL_FORMAT,
+  PDF_FORMAT,
+  DEFAULT_MEDIA,
+  buildPdfPrintArgs,
   buildPrintArgs,
   findOcomPrinter,
   getDefaultPrinter,
   getPrinterDeviceUri,
+  getPrinterMedia,
   getPrinterStatus,
   isOcomPrinter,
   listConnectedDeviceUris,
@@ -331,8 +451,11 @@ module.exports = {
   normalizeDeviceUri,
   parseConnectedDeviceUris,
   parseDeviceUri,
+  parseLpOptions,
+  parsePageSize,
   parsePrinters,
   printerExists,
+  submitPdf,
   submitZpl,
   usbDeviceMatches,
 };

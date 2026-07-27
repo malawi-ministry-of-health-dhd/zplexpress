@@ -77,8 +77,18 @@
       <div class="row"><span class="k">State</span><span class="v" id="printer-state">—</span></div>
       <div class="row"><span class="k">Connection</span><span class="v" id="printer-connection">—</span></div>
       <div class="row"><span class="k">Print path</span><span class="v" id="printer-driver">—</span></div>
+      <div class="row">
+        <span class="k">OCOM renderer</span>
+        <span class="v">
+          <select id="render-mode-select">
+            <option value="PDFRaster">PDFRaster — local PDF</option>
+            <option value="NativeTSPL">NativeTSPL — direct conversion</option>
+          </select>
+        </span>
+      </div>
       <div class="row"><span class="k">Device</span><span class="v" id="printer-device">—</span></div>
       <div id="printer-msg" class="msg" hidden></div>
+      <div id="render-mode-msg" class="msg" hidden></div>
     </div>
 
     <div class="card">
@@ -113,6 +123,8 @@
     const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
     const select = document.getElementById('printer-select');
     const msg = document.getElementById('printer-msg');
+    const renderModeSelect = document.getElementById('render-mode-select');
+    const renderModeMsg = document.getElementById('render-mode-msg');
 
     function showMsg(text, ok) {
       msg.textContent = text;
@@ -156,6 +168,29 @@
         showMsg('Error: ' + err.message, false);
       } finally {
         select.disabled = false;
+      }
+    });
+
+    renderModeSelect.addEventListener('change', async () => {
+      renderModeSelect.disabled = true;
+      renderModeMsg.hidden = true;
+      try {
+        const res = await fetch('/render-mode', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ renderMode: renderModeSelect.value }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to change renderer');
+        renderModeMsg.textContent = 'OCOM renderer set to ' + data.renderMode;
+        renderModeMsg.className = 'msg ok';
+        renderModeMsg.hidden = false;
+      } catch (err) {
+        renderModeMsg.textContent = 'Error: ' + err.message;
+        renderModeMsg.className = 'msg err';
+        renderModeMsg.hidden = false;
+      } finally {
+        renderModeSelect.disabled = false;
       }
     });
 
@@ -226,6 +261,9 @@
         }
         document.getElementById('printer-driver').textContent = printer.driver || '—';
         document.getElementById('printer-device').textContent = printer.deviceUri || '—';
+        if (data.renderMode && document.activeElement !== renderModeSelect && !renderModeSelect.disabled) {
+          renderModeSelect.value = data.renderMode;
+        }
 
         // Seed the port field once (don't overwrite while the user edits it).
         if (!portInitialized && data.port != null && document.activeElement !== portInput) {

@@ -6,7 +6,8 @@ Architecture: all
 Depends: nodejs (>= 18.0.0), cups, cups-client, xdg-utils, ocom-ocbp-t4201-driver (>= 1.0.3)
 Maintainer: Louis Nyirongo <louisnyirongo@lukeinternational.no>
 Homepage: https://github.com/malawi-ministry-of-health-dhd/zplexpress
-Description: ZPL printing service with OCOM USB detection and web dashboard
+Description: Local ZPL-to-PDF printing service with OCOM USB detection
  A Node.js service that receives ZPL (Zebra Programming Language) over HTTP
- and prints to a CUPS printer. OCOM OCBP-T4201 jobs are routed through the
- installed ZPL-to-TSPL driver, with physical USB connection detection.
+ and prints to a CUPS printer. OCOM OCBP-T4201 jobs can be rendered locally
+ to exact-size PDF or routed through the installed ZPL-to-TSPL translator,
+ with physical USB connection detection and a web configuration dashboard.

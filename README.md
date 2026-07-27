@@ -1,6 +1,13 @@
 # ZPL Printing Service
 
-A Node.js service for handling ZPL (Zebra Programming Language) label printing.
+A Node.js service that renders common ZPL label commands locally and prints
+them through CUPS. OCOM printers can use either:
+
+- `PDFRaster` (default): ZPL → exact-size PDF → CUPS raster → TSPL
+- `NativeTSPL`: ZPL → TSPL using the OCOM driver's translator
+
+Real Zebra queues continue to receive raw ZPL. The PDF renderer is local, so
+patient and label data is not sent to an Internet rendering service.
 
 ## Install
 
@@ -29,7 +36,7 @@ harmless `_apt` sandbox notice you get when installing from `~/Downloads`:
 
 ```bash
 DRIVER_VER=1.0.3
-ZPLEXPRESS_VER=1.0.4
+ZPLEXPRESS_VER=1.1.0
 
 curl -fsSLO "https://github.com/malawi-ministry-of-health-dhd/linux_printer_driver/releases/download/v${DRIVER_VER}/ocom-ocbp-t4201-driver_${DRIVER_VER}_amd64.deb"
 curl -fsSLO "https://github.com/malawi-ministry-of-health-dhd/zplexpress/releases/download/v${ZPLEXPRESS_VER}/zplexpress_${ZPLEXPRESS_VER}_all.deb"
@@ -52,7 +59,9 @@ Everything can be configured from the browser dashboard — no terminal needed:
    `http://<this-host>:3000/`).
 2. The installed `OCOM_Ubuntu_Driver` queue is selected automatically. If
    needed, pick a different printer from the dropdown.
-3. Set the **port** if you want to change it (the page reloads on the new port).
+3. Select **PDFRaster** for local PDF rendering or **NativeTSPL** for direct
+   conversion.
+4. Set the **port** if you want to change it (the page reloads on the new port).
 
 The dashboard distinguishes an installed CUPS queue from the physical USB
 connection. It shows **USB connected** only while the OCOM printer is plugged
@@ -69,7 +78,7 @@ Your printer/port config in `/etc/zplexpress/config.json` is preserved.
 
 Every push to `main` runs the tests, builds a Debian package, and creates a
 `build-<run number>` prerelease with the `.deb` attached. Pushing a version tag
-such as `v1.0.4` creates the normal versioned GitHub Release.
+such as `v1.1.0` creates the normal versioned GitHub Release.
 
 ## Development / manual setup
 
@@ -113,11 +122,13 @@ The wizard lets you:
   listed; the OCOM queue is clearly marked and reports when its USB device is
   unplugged.
 - **Set the port** — the port the print server listens on.
+- **Select an OCOM renderer** — `PDFRaster` or `NativeTSPL`.
 
-`config.json` holds two values:
+`config.json` holds three values:
 
 - `printerName`: The name of the selected ZPL-compatible printer
 - `port`: The port number for the service (default: 3000)
+- `renderMode`: `PDFRaster` (default) or `NativeTSPL`
 
 If no printer has been configured yet, the setup wizard runs automatically the
 first time you start the server. Environment variables (`PRINTER_NAME`, `PORT`
@@ -174,16 +185,59 @@ with `RUN_USER` / `RUN_GROUP` set.
 
 Once the service is running, you can send ZPL commands to your configured printer through the API endpoints.
 
-For an OCOM queue, ZPLExpress submits the job as
-`application/vnd.ocom-zpl`. CUPS then runs the installed `zpl_to_tspl` filter;
-it does not send incompatible raw ZPL to the TSPL-only printer. Genuine Zebra
-queues continue to receive raw ZPL.
+In the default `PDFRaster` mode, ZPLExpress reads the selected CUPS
+`PageSize`, creates a PDF with that exact physical media box, and submits it as
+`application/pdf`. CUPS rasterizes the PDF and the OCOM driver produces TSPL.
+The ZPL `^PW` and `^LL` remain logical coordinates and cannot change the
+physical label feed length.
 
 ```bash
 curl -X POST http://localhost:3000/print \
   -H 'Content-Type: application/json' \
   --data '{"zpl":"^XA^PW812^LL305^FO80,25^BY3^BCN,110,Y,N,N^FDJOHNDOE^FS^FO285,210^A0N,34,34^FDJOHN DOE^FS^XZ"}'
 ```
+
+Preview the same local rendering without printing:
+
+```bash
+curl -X POST http://localhost:3000/render \
+  -H 'Content-Type: application/json' \
+  --data '{"zpl":"^XA^PW812^LL305^FO10,5^A0N,30,30^FDTEST^FS^XZ"}' \
+  --output label-preview.pdf
+```
+
+Override the configured mode for one OCOM print:
+
+```bash
+curl -X POST http://localhost:3000/print \
+  -H 'Content-Type: application/json' \
+  --data '{"renderMode":"NativeTSPL","zpl":"^XA^FO10,5^A0N,30,30^FDTEST^FS^XZ"}'
+```
+
+### Configure the physical label size
+
+Set the size on the CUPS queue. The service reads it for every PDF render:
+
+```bash
+# 101.6 x 38.1 mm
+sudo lpadmin -p OCOM_Ubuntu_Driver -o PageSize=w288h108
+
+# Confirm it
+sudo lpoptions -p OCOM_Ubuntu_Driver |
+  tr ' ' '\n' |
+  grep '^PageSize='
+```
+
+For a custom size supported by the driver, use a CUPS custom media name such
+as `Custom.101.6x38.1mm`. Do not rely on `^LL` to configure the stock; `^LL`
+only describes the ZPL drawing canvas.
+
+The local renderer currently handles the common commands used by ZPLExpress
+labels: `^FO`, `^FT`, `^A`, `^CF`, `^FB`, `^FD`, `^FH`, `^GB`, `^GC`,
+uncompressed `^GFA`, `^BY`, `^BC`, `^B3`, `^BQ`, and `^PQ`. Unsupported
+specialized commands are ignored rather than being forwarded to an online
+service. Use `NativeTSPL` when a label depends on a command implemented by the
+OCOM translator but not by the PDF renderer.
 
 If the configured OCOM USB printer is unplugged, this endpoint returns HTTP
 `503` with an explanation instead of queueing a job that cannot print.
