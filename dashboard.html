@@ -36,6 +36,7 @@
     .dot.live { animation: pulse 1.6s ease-in-out infinite; }
     @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
     .row { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+    .row[hidden] { display: none; }
     .row:last-child { border-bottom: none; }
     .row .k { color: var(--muted); }
     .row .v { font-weight: 500; text-align: right; word-break: break-all; }
@@ -87,7 +88,7 @@
       <div class="row"><span class="k">State</span><span class="v" id="printer-state">—</span></div>
       <div class="row"><span class="k">Connection</span><span class="v" id="printer-connection">—</span></div>
       <div class="row"><span class="k">Print path</span><span class="v" id="printer-driver">—</span></div>
-      <div class="row" id="render-mode-row">
+      <div class="row" id="render-mode-row" hidden>
         <span class="k">OCOM renderer</span>
         <span class="v">
           <select id="render-mode-select">

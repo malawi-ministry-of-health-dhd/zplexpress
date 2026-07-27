@@ -38,7 +38,7 @@ avoids the harmless `_apt` sandbox notice you get when installing from
 
 ```bash
 DRIVER_VER=1.0.3
-ZPLEXPRESS_VER=1.2.0
+ZPLEXPRESS_VER=1.2.1
 
 curl -fsSLO "https://github.com/malawi-ministry-of-health-dhd/linux_printer_driver/releases/download/v${DRIVER_VER}/ocom-ocbp-t4201-driver_${DRIVER_VER}_amd64.deb"
 curl -fsSLO "https://github.com/malawi-ministry-of-health-dhd/zplexpress/releases/download/v${ZPLEXPRESS_VER}/zplexpress_${ZPLEXPRESS_VER}_all.deb"
@@ -81,7 +81,7 @@ Your printer/port config in `/etc/zplexpress/config.json` is preserved.
 
 Every push to `main` runs the tests, builds a Debian package, and creates a
 `build-<run number>` prerelease with the `.deb` attached. Pushing a version tag
-such as `v1.2.0` creates the normal versioned GitHub Release.
+such as `v1.2.1` creates the normal versioned GitHub Release.
 
 ## Development / manual setup
 
