@@ -62,7 +62,9 @@ jobs:
           test "$(dpkg-deb --field "$package" Version)" = "$version"
           test "$(dpkg-deb --field "$package" Architecture)" = "all"
           test "$(dpkg-deb --field "$package" Depends)" = \
-            "nodejs (>= 18.0.0), cups, cups-client, xdg-utils, ocom-ocbp-t4201-driver (>= 1.0.3)"
+            "nodejs (>= 18.0.0), cups, cups-client, xdg-utils"
+          test "$(dpkg-deb --field "$package" Suggests)" = \
+            "ocom-ocbp-t4201-driver (>= 1.0.3)"
           (
             cd dist
             sha256sum ./*.deb > SHA256SUMS.txt
@@ -101,7 +103,8 @@ jobs:
 
           {
             printf 'Automated Debian package for commit %s.\n\n' "$GITHUB_SHA"
-            printf 'Install the OCOM driver first, then install this package:\n\n'
+            printf 'For OCOM, install its driver first. ARGOX/ZEBRA use a raw CUPS queue.\n\n'
+            printf 'Install ZPLExpress with:\n\n'
             printf '~~~bash\n'
             printf 'sudo apt install ./%s\n' "$(basename "$package")"
             printf '~~~\n'

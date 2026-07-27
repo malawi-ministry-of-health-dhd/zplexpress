@@ -1,5 +1,6 @@
 const { execFile, spawn } = require('child_process');
 const { promisify } = require('util');
+const { PRINTER_MODELS } = require('./config');
 
 const execFileAsync = promisify(execFile);
 
@@ -151,6 +152,17 @@ function isOcomPrinter(name, deviceUri = '') {
   return /(?:ocom|ocbp[-_ ]?t?4201)/i.test(identity);
 }
 
+function detectPrinterModel(name, deviceUri = '') {
+  const identity = `${String(name || '')} ${normalizeDeviceUri(deviceUri)}`;
+  if (isOcomPrinter(name, deviceUri)) return PRINTER_MODELS.OCOM;
+  if (/\bargox\b/i.test(identity)) return PRINTER_MODELS.ARGOX;
+  if (/\bzebra\b/i.test(identity)) return PRINTER_MODELS.ZEBRA;
+
+  // Unknown ZPL-compatible queues use raw ZPL. The user can identify the
+  // queue as ARGOX or ZEBRA in the dashboard without changing that behavior.
+  return PRINTER_MODELS.ZEBRA;
+}
+
 // List printers registered with CUPS via `lpstat -p`.
 async function listPrinters() {
   try {
@@ -237,6 +249,7 @@ async function getPrinterStatus(name) {
       reason: 'No printer is configured',
       deviceUri: null,
       isOcom: false,
+      detectedModel: null,
       driver: null,
       activeJobId: null,
     };
@@ -253,6 +266,7 @@ async function getPrinterStatus(name) {
       reason: `The CUPS queue "${name}" is not installed`,
       deviceUri: null,
       isOcom: isOcomPrinter(name),
+      detectedModel: detectPrinterModel(name),
       driver: isOcomPrinter(name) ? 'OCOM ZPL-to-TSPL' : 'Raw ZPL',
       activeJobId: null,
     };
@@ -280,6 +294,7 @@ async function getPrinterStatus(name) {
   const available = enabled && connected !== false;
   const printing = printer.status.match(/now printing\s+([^\s.]+)/i);
   const ocom = isOcomPrinter(name, deviceUri);
+  const detectedModel = detectPrinterModel(name, deviceUri);
 
   let reason = 'Connection is managed by CUPS';
   if (!enabled) reason = 'The CUPS queue is disabled';
@@ -296,7 +311,8 @@ async function getPrinterStatus(name) {
     reason,
     deviceUri,
     isOcom: ocom,
-    driver: ocom ? 'OCOM ZPL-to-TSPL' : 'Raw ZPL',
+    detectedModel,
+    driver: ocom ? 'OCOM ZPL-to-TSPL' : `${detectedModel} raw ZPL`,
     activeJobId: printing ? printing[1] : null,
     connectionCheckError,
   };
@@ -439,6 +455,7 @@ module.exports = {
   DEFAULT_MEDIA,
   buildPdfPrintArgs,
   buildPrintArgs,
+  detectPrinterModel,
   findOcomPrinter,
   getDefaultPrinter,
   getPrinterDeviceUri,

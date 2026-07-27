@@ -74,10 +74,20 @@
         <span class="k">Active printer</span>
         <span class="v"><select id="printer-select"><option>Loading…</option></select></span>
       </div>
+      <div class="row">
+        <span class="k">Printer model</span>
+        <span class="v">
+          <select id="printer-model-select">
+            <option value="ARGOX">ARGOX — raw ZPL</option>
+            <option value="ZEBRA">ZEBRA — raw ZPL</option>
+            <option value="OCOM">OCOM — renderer</option>
+          </select>
+        </span>
+      </div>
       <div class="row"><span class="k">State</span><span class="v" id="printer-state">—</span></div>
       <div class="row"><span class="k">Connection</span><span class="v" id="printer-connection">—</span></div>
       <div class="row"><span class="k">Print path</span><span class="v" id="printer-driver">—</span></div>
-      <div class="row">
+      <div class="row" id="render-mode-row">
         <span class="k">OCOM renderer</span>
         <span class="v">
           <select id="render-mode-select">
@@ -88,6 +98,7 @@
       </div>
       <div class="row"><span class="k">Device</span><span class="v" id="printer-device">—</span></div>
       <div id="printer-msg" class="msg" hidden></div>
+      <div id="printer-model-msg" class="msg" hidden></div>
       <div id="render-mode-msg" class="msg" hidden></div>
     </div>
 
@@ -123,8 +134,17 @@
     const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
     const select = document.getElementById('printer-select');
     const msg = document.getElementById('printer-msg');
+    const printerModelSelect = document.getElementById('printer-model-select');
+    const printerModelMsg = document.getElementById('printer-model-msg');
+    const renderModeRow = document.getElementById('render-mode-row');
     const renderModeSelect = document.getElementById('render-mode-select');
     const renderModeMsg = document.getElementById('render-mode-msg');
+
+    function updateRendererVisibility(printerModel) {
+      renderModeRow.hidden = printerModel !== 'OCOM';
+      if (printerModel !== 'OCOM') renderModeMsg.hidden = true;
+    }
+    updateRendererVisibility(printerModelSelect.value);
 
     function showMsg(text, ok) {
       msg.textContent = text;
@@ -139,12 +159,16 @@
         const data = await res.json();
         select.innerHTML = data.printers
           .map(p => '<option value="' + esc(p.name) + '">' + esc(p.name) +
-            (p.isOcom ? ' — OCOM driver' : '') + '</option>').join('');
+            ' — ' + esc(p.detectedModel || 'ZEBRA') + '</option>').join('');
         if (!data.printers.length) {
           select.innerHTML = '<option value="">No CUPS printers installed</option>';
           select.disabled = true;
         }
         if (data.configured) select.value = data.configured;
+        if (data.configuredModel) {
+          printerModelSelect.value = data.configuredModel;
+          updateRendererVisibility(data.configuredModel);
+        }
       } catch (err) {
         select.innerHTML = '<option>Could not load printers</option>';
       }
@@ -162,12 +186,42 @@
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'Failed to switch printer');
-        showMsg('Active printer set to ' + name, true);
+        printerModelSelect.value = data.printerModel;
+        updateRendererVisibility(data.printerModel);
+        showMsg('Active printer set to ' + name + ' as ' + data.printerModel, true);
         refresh();
       } catch (err) {
         showMsg('Error: ' + err.message, false);
       } finally {
         select.disabled = false;
+      }
+    });
+
+    printerModelSelect.addEventListener('change', async () => {
+      const printerModel = printerModelSelect.value;
+      printerModelSelect.disabled = true;
+      printerModelMsg.hidden = true;
+      try {
+        const res = await fetch('/printer-model', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ printerModel }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to change printer model');
+        updateRendererVisibility(data.printerModel);
+        printerModelMsg.textContent = data.printerModel === 'OCOM'
+          ? 'OCOM selected — choose the renderer below.'
+          : data.printerModel + ' selected — ZPL will be sent directly.';
+        printerModelMsg.className = 'msg ok';
+        printerModelMsg.hidden = false;
+        refresh();
+      } catch (err) {
+        printerModelMsg.textContent = 'Error: ' + err.message;
+        printerModelMsg.className = 'msg err';
+        printerModelMsg.hidden = false;
+      } finally {
+        printerModelSelect.disabled = false;
       }
     });
 
@@ -261,6 +315,14 @@
         }
         document.getElementById('printer-driver').textContent = printer.driver || '—';
         document.getElementById('printer-device').textContent = printer.deviceUri || '—';
+        if (
+          data.printerModel
+          && document.activeElement !== printerModelSelect
+          && !printerModelSelect.disabled
+        ) {
+          printerModelSelect.value = data.printerModel;
+          updateRendererVisibility(data.printerModel);
+        }
         if (data.renderMode && document.activeElement !== renderModeSelect && !renderModeSelect.disabled) {
           renderModeSelect.value = data.renderMode;
         }

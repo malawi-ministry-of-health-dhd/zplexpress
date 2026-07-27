@@ -6,7 +6,7 @@ them through CUPS. OCOM printers can use either:
 - `PDFRaster` (default): ZPL → exact-size PDF → CUPS raster → TSPL
 - `NativeTSPL`: ZPL → TSPL using the OCOM driver's translator
 
-Real Zebra queues continue to receive raw ZPL. The PDF renderer is local, so
+ARGOX and ZEBRA queues receive raw ZPL directly. The PDF renderer is local, so
 patient and label data is not sent to an Internet rendering service.
 
 ## Install
@@ -16,8 +16,8 @@ ZPLExpress uses the
 to translate ZPL into the printer's native TSPL. Install that driver first,
 then install `zplexpress_<version>_all.deb` from the
 [ZPLExpress Releases](https://github.com/malawi-ministry-of-health-dhd/zplexpress/releases)
-page. The ZPLExpress package declares the OCOM driver as a dependency so it
-cannot be accidentally installed without the required print path.
+page. The OCOM driver is only required when the selected model is `OCOM`;
+ARGOX and ZEBRA printers only require a working raw CUPS queue.
 
 **GUI (recommended).** On Ubuntu 22.04+ the default "App Center" cannot install
 local `.deb` files, so install **GDebi** once, then all installs are graphical:
@@ -26,17 +26,19 @@ local `.deb` files, so install **GDebi** once, then all installs are graphical:
 sudo apt install gdebi     # one time, per machine
 ```
 
-Then install the OCOM driver `.deb` first. In **Files**, right-click it →
+For an OCOM printer, install the OCOM driver `.deb` first. In **Files**,
+right-click it →
 **Open With Other Application** → **GDebi Package Installer** (tick *Set as
 default* to enable double-click), and click **Install Package**. Repeat for the
 ZPLExpress `.deb`.
 
-**Terminal (alternative).** Installing from a world-readable path avoids the
-harmless `_apt` sandbox notice you get when installing from `~/Downloads`:
+**Terminal (alternative for OCOM).** Installing from a world-readable path
+avoids the harmless `_apt` sandbox notice you get when installing from
+`~/Downloads`:
 
 ```bash
 DRIVER_VER=1.0.3
-ZPLEXPRESS_VER=1.1.0
+ZPLEXPRESS_VER=1.2.0
 
 curl -fsSLO "https://github.com/malawi-ministry-of-health-dhd/linux_printer_driver/releases/download/v${DRIVER_VER}/ocom-ocbp-t4201-driver_${DRIVER_VER}_amd64.deb"
 curl -fsSLO "https://github.com/malawi-ministry-of-health-dhd/zplexpress/releases/download/v${ZPLEXPRESS_VER}/zplexpress_${ZPLEXPRESS_VER}_all.deb"
@@ -59,13 +61,14 @@ Everything can be configured from the browser dashboard — no terminal needed:
    `http://<this-host>:3000/`).
 2. The installed `OCOM_Ubuntu_Driver` queue is selected automatically. If
    needed, pick a different printer from the dropdown.
-3. Select **PDFRaster** for local PDF rendering or **NativeTSPL** for direct
-   conversion.
-4. Set the **port** if you want to change it (the page reloads on the new port).
+3. Select the printer model: **ARGOX**, **ZEBRA**, or **OCOM**.
+4. For OCOM only, select **PDFRaster** for local PDF rendering or
+   **NativeTSPL** for direct conversion. ARGOX and ZEBRA always receive raw ZPL.
+5. Set the **port** if you want to change it (the page reloads on the new port).
 
 The dashboard distinguishes an installed CUPS queue from the physical USB
-connection. It shows **USB connected** only while the OCOM printer is plugged
-in and powered on.
+connection. It shows **USB connected** only while the selected USB printer is
+plugged in and powered on.
 
 Prefer the terminal? Run `sudo zplexpress setup` for the interactive wizard.
 The service listens on port **3000** by default.
@@ -78,7 +81,7 @@ Your printer/port config in `/etc/zplexpress/config.json` is preserved.
 
 Every push to `main` runs the tests, builds a Debian package, and creates a
 `build-<run number>` prerelease with the `.deb` attached. Pushing a version tag
-such as `v1.1.0` creates the normal versioned GitHub Release.
+such as `v1.2.0` creates the normal versioned GitHub Release.
 
 ## Development / manual setup
 
@@ -121,18 +124,23 @@ The wizard lets you:
 - **Select a printer** — all printers registered with CUPS (`lpstat -p`) are
   listed; the OCOM queue is clearly marked and reports when its USB device is
   unplugged.
+- **Select the printer model** — `ARGOX`, `ZEBRA`, or `OCOM`. ARGOX and ZEBRA
+  use raw ZPL.
 - **Set the port** — the port the print server listens on.
-- **Select an OCOM renderer** — `PDFRaster` or `NativeTSPL`.
+- **Select an OCOM renderer** — `PDFRaster` or `NativeTSPL`; this question is
+  only shown for OCOM.
 
-`config.json` holds three values:
+`config.json` holds four values:
 
 - `printerName`: The name of the selected ZPL-compatible printer
+- `printerModel`: `ARGOX`, `ZEBRA`, or `OCOM`
 - `port`: The port number for the service (default: 3000)
-- `renderMode`: `PDFRaster` (default) or `NativeTSPL`
+- `renderMode`: `PDFRaster` (default) or `NativeTSPL`, used only for OCOM
 
 If no printer has been configured yet, the setup wizard runs automatically the
-first time you start the server. Environment variables (`PRINTER_NAME`, `PORT`
-in `.env`) are still honored as a fallback when `config.json` is absent.
+first time you start the server. Environment variables (`PRINTER_NAME`,
+`PRINTER_MODEL`, `ZPL_RENDER_MODE`, and `PORT` in `.env`) are still honored as
+a fallback when `config.json` is absent.
 
 ## Running the Service
 
@@ -183,9 +191,11 @@ with `RUN_USER` / `RUN_GROUP` set.
 
 ## Usage
 
-Once the service is running, you can send ZPL commands to your configured printer through the API endpoints.
+Once the service is running, you can send ZPL commands to your configured
+printer through the API endpoints. ARGOX and ZEBRA jobs are submitted with
+`lp -o raw`; ZPLExpress does not translate their ZPL.
 
-In the default `PDFRaster` mode, ZPLExpress reads the selected CUPS
+For OCOM in the default `PDFRaster` mode, ZPLExpress reads the selected CUPS
 `PageSize`, creates a PDF with that exact physical media box, and submits it as
 `application/pdf`. CUPS rasterizes the PDF and the OCOM driver produces TSPL.
 The ZPL `^PW` and `^LL` remain logical coordinates and cannot change the
@@ -246,6 +256,7 @@ If the configured OCOM USB printer is unplugged, this endpoint returns HTTP
 
 - Node.js 18+
 - `ocom-ocbp-t4201-driver` 1.0.3 or newer for an OCOM OCBP-T4201
+- A raw ZPL-compatible CUPS queue for ARGOX or ZEBRA
 - CUPS and a USB connection to the printer
 
 ## Troubleshooting

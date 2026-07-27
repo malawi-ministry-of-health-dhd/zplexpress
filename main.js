@@ -8,16 +8,20 @@ const bodyParser = require('body-parser');
 const cors = require('cors');
 
 const {
+  PRINT_ROUTES,
+  PRINTER_MODELS,
   RENDER_MODES,
   loadConfig,
+  normalizePrinterModel,
   normalizeRenderMode,
+  resolvePrintRoute,
   saveConfig,
 } = require('./config');
 const {
+  detectPrinterModel,
   findOcomPrinter,
   getPrinterMedia,
   getPrinterStatus,
-  isOcomPrinter,
   listJobs,
   listPrinters,
   printerExists,
@@ -50,6 +54,15 @@ function validateZpl(value) {
   return value;
 }
 
+function describePrintPath(printerModel, renderMode) {
+  if (printerModel === PRINTER_MODELS.OCOM) {
+    return renderMode === RENDER_MODES.PDF_RASTER
+      ? 'OCOM PDFRaster → CUPS raster → TSPL'
+      : 'OCOM NativeTSPL → ZPL-to-TSPL';
+  }
+  return `${printerModel} raw ZPL`;
+}
+
 async function main() {
   if (process.argv.includes('setup')) {
     await runWizard();
@@ -64,7 +77,11 @@ async function main() {
     if (!configuredQueueExists) {
       const ocomPrinter = await findOcomPrinter();
       if (ocomPrinter) {
-        config = { ...config, printerName: ocomPrinter };
+        config = {
+          ...config,
+          printerName: ocomPrinter,
+          printerModel: PRINTER_MODELS.OCOM,
+        };
         saveConfig(config);
         console.log(`Automatically selected OCOM printer: ${ocomPrinter}`);
       }
@@ -90,14 +107,21 @@ async function main() {
 async function startServer(config) {
   const app = express();
   let printerName = config.printerName;
+  let printerModel = normalizePrinterModel(config.printerModel)
+    || detectPrinterModel(config.printerName);
   let currentPort = config.port;
   let renderMode = normalizeRenderMode(config.renderMode);
   let httpServer;
 
-  const persistConfig = () => saveConfig({ printerName, port: currentPort, renderMode });
+  const persistConfig = () => saveConfig({
+    printerName,
+    printerModel,
+    port: currentPort,
+    renderMode,
+  });
 
   console.log(
-    `Starting server (preferred port: ${currentPort}, printer: ${printerName}, renderer: ${renderMode})`,
+    `Starting server (preferred port: ${currentPort}, printer: ${printerName}, model: ${printerModel})`,
   );
 
   async function ensurePrinterSelection() {
@@ -106,6 +130,7 @@ async function startServer(config) {
     const ocomPrinter = await findOcomPrinter();
     if (ocomPrinter) {
       printerName = ocomPrinter;
+      printerModel = PRINTER_MODELS.OCOM;
       persistConfig();
       console.log(`Detected and selected OCOM printer: ${printerName}`);
     }
@@ -137,11 +162,18 @@ async function startServer(config) {
       await ensurePrinterSelection();
       const printer = await getPrinterStatus(printerName);
       const jobs = await listJobs(printer.activeJobId);
+      const driver = describePrintPath(printerModel, renderMode);
       res.status(200).json({
         service: 'running',
         port: currentPort,
+        printerModel,
         renderMode,
-        printer: { name: printerName, ...printer },
+        printer: {
+          name: printerName,
+          ...printer,
+          selectedModel: printerModel,
+          driver,
+        },
         jobs,
       });
     } catch (error) {
@@ -158,11 +190,16 @@ async function startServer(config) {
     try {
       await ensurePrinterSelection();
       const printers = await listPrinters();
+      const statuses = await Promise.all(
+        printers.map(printer => getPrinterStatus(printer.name)),
+      );
       res.status(200).json({
         configured: printerName,
-        printers: printers.map(printer => ({
+        configuredModel: printerModel,
+        printers: printers.map((printer, index) => ({
           ...printer,
-          isOcom: isOcomPrinter(printer.name),
+          isOcom: statuses[index].isOcom,
+          detectedModel: statuses[index].detectedModel,
         })),
       });
     } catch {
@@ -180,12 +217,15 @@ async function startServer(config) {
       if (!(await printerExists(name))) {
         return res.status(400).json({ error: `CUPS queue "${name}" is not installed` });
       }
+      const status = await getPrinterStatus(name);
       printerName = name;
+      printerModel = status.detectedModel || detectPrinterModel(name);
       persistConfig();
-      console.log(`Active printer changed to: ${name}`);
+      console.log(`Active printer changed to: ${name} (${printerModel})`);
       return res.status(200).json({
-        message: `Active printer set to ${name}`,
+        message: `Active printer set to ${name} as ${printerModel}`,
         printerName: name,
+        printerModel,
       });
     } catch (error) {
       console.error(`Could not select printer: ${error.message}`);
@@ -193,8 +233,30 @@ async function startServer(config) {
     }
   });
 
+  app.post('/printer-model', (req, res) => {
+    try {
+      const selectedModel = normalizePrinterModel(req.body.printerModel);
+      if (!selectedModel) throw new TypeError('printerModel is required');
+      printerModel = selectedModel;
+      persistConfig();
+      console.log(`Printer model changed to: ${printerModel}`);
+      return res.status(200).json({
+        message: `Printer model set to ${printerModel}`,
+        printerModel,
+        renderMode: printerModel === PRINTER_MODELS.OCOM ? renderMode : 'RawZPL',
+      });
+    } catch (error) {
+      return res.status(400).json({ error: error.message });
+    }
+  });
+
   app.post('/render-mode', (req, res) => {
     try {
+      if (printerModel !== PRINTER_MODELS.OCOM) {
+        return res.status(400).json({
+          error: 'OCOM renderer can only be selected when printerModel is OCOM',
+        });
+      }
       renderMode = normalizeRenderMode(req.body.renderMode);
       persistConfig();
       console.log(`OCOM render mode changed to: ${renderMode}`);
@@ -259,10 +321,12 @@ async function startServer(config) {
 
   app.post('/print', async (req, res) => {
     let zpl;
-    let requestedMode;
+    let requestedMode = null;
     try {
       zpl = validateZpl(req.body.zpl);
-      requestedMode = normalizeRenderMode(req.body.renderMode ?? renderMode);
+      if (printerModel === PRINTER_MODELS.OCOM) {
+        requestedMode = normalizeRenderMode(req.body.renderMode ?? renderMode);
+      }
     } catch (error) {
       return res.status(400).json({ error: error.message });
     }
@@ -272,10 +336,13 @@ async function startServer(config) {
       const printer = await getPrinterStatus(printerName);
 
       if (!printer.queueAvailable) {
+        const setupHint = printerModel === PRINTER_MODELS.OCOM
+          ? 'Install the OCOM driver or select another printer.'
+          : 'Install or select its CUPS queue.';
         return res.status(503).json({
           error: printerName
-            ? `The CUPS queue "${printerName}" is not installed. Install the OCOM driver or select another printer.`
-            : 'No printer is configured. Install the OCOM driver or select a printer from the dashboard.',
+            ? `The CUPS queue "${printerName}" is not installed. ${setupHint}`
+            : 'No printer is configured. Select a CUPS printer from the dashboard.',
           printer,
         });
       }
@@ -286,9 +353,8 @@ async function startServer(config) {
         });
       }
       if (printer.connected === false) {
-        const printerType = printer.isOcom ? 'OCOM printer' : 'USB printer';
         return res.status(503).json({
-          error: `${printerType} "${printerName}" is unplugged or powered off. Connect it by USB and try again.`,
+          error: `${printerModel} printer "${printerName}" is unplugged or powered off. Connect it by USB and try again.`,
           printer,
         });
       }
@@ -297,7 +363,8 @@ async function startServer(config) {
       let driver;
       let warnings = [];
       let media = null;
-      if (printer.isOcom && requestedMode === RENDER_MODES.PDF_RASTER) {
+      const route = resolvePrintRoute(printerModel, requestedMode);
+      if (route === PRINT_ROUTES.OCOM_PDF_RASTER) {
         const rendered = await renderLabel(zpl);
         result = await submitPdf(
           printerName,
@@ -308,9 +375,13 @@ async function startServer(config) {
         driver = 'OCOM PDFRaster → CUPS raster → TSPL';
         warnings = rendered.warnings;
         media = rendered.media;
+      } else if (route === PRINT_ROUTES.OCOM_NATIVE_TSPL) {
+        result = await submitZpl(printerName, zpl, true);
+        driver = describePrintPath(printerModel, requestedMode);
       } else {
-        result = await submitZpl(printerName, zpl, printer.isOcom);
-        driver = printer.driver;
+        // ARGOX and ZEBRA both implement ZPL and must receive it unchanged.
+        result = await submitZpl(printerName, zpl, false);
+        driver = describePrintPath(printerModel, null);
       }
 
       console.log(
@@ -320,7 +391,8 @@ async function startServer(config) {
         message: `Label sent to printer: ${printerName}`,
         jobId: result.jobId,
         driver,
-        renderMode: printer.isOcom ? requestedMode : 'RawZPL',
+        printerModel,
+        renderMode: printerModel === PRINTER_MODELS.OCOM ? requestedMode : 'RawZPL',
         media,
         warnings,
       });

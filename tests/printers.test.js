@@ -9,6 +9,7 @@ const {
   OCOM_ZPL_FORMAT,
   buildPdfPrintArgs,
   buildPrintArgs,
+  detectPrinterModel,
   getPrinterStatus,
   isOcomPrinter,
   parseConnectedDeviceUris,
@@ -80,7 +81,23 @@ test('recognizes the standard queue and OCBP-T4201 USB identity as OCOM', () => 
   assert.equal(isOcomPrinter('Zebra_GK420d', 'usb://Zebra/GK420d'), false);
 });
 
-test('routes OCOM jobs through the custom MIME filter and Zebra jobs as raw', () => {
+test('detects OCOM, ARGOX, and ZEBRA printer models', () => {
+  assert.equal(
+    detectPrinterModel('OCOM_Ubuntu_Driver', 'usb://LabelPrinter/OCBP-T4201'),
+    'OCOM',
+  );
+  assert.equal(
+    detectPrinterModel('Argox_OS-2140', 'usb://Argox/OS-2140'),
+    'ARGOX',
+  );
+  assert.equal(
+    detectPrinterModel('Zebra_GK420d', 'usb://Zebra/GK420d'),
+    'ZEBRA',
+  );
+  assert.equal(detectPrinterModel('Generic_ZPL_Printer'), 'ZEBRA');
+});
+
+test('routes OCOM through its MIME filter and ARGOX/ZEBRA as raw ZPL', () => {
   assert.deepEqual(buildPrintArgs('OCOM_Ubuntu_Driver', true), [
     '-d',
     'OCOM_Ubuntu_Driver',
@@ -94,6 +111,16 @@ test('routes OCOM jobs through the custom MIME filter and Zebra jobs as raw', ()
   assert.deepEqual(buildPrintArgs('Zebra_GK420d', false), [
     '-d',
     'Zebra_GK420d',
+    '-t',
+    'ZPLExpress label',
+    '-o',
+    'raw',
+    '-',
+  ]);
+
+  assert.deepEqual(buildPrintArgs('Argox_OS-2140', false), [
+    '-d',
+    'Argox_OS-2140',
     '-t',
     'ZPLExpress label',
     '-o',
