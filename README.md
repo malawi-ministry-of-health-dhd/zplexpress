@@ -72,6 +72,15 @@ The dashboard distinguishes an installed CUPS queue from the physical USB
 connection. It shows **USB connected** only while the selected USB printer is
 plugged in and powered on.
 
+The **Test Print** card contains three built-in 203-dpi samples: a simple ZPL
+label, an EPL barcode label, and an EPL visit summary. Each uses a 1523 × 508
+dot logical canvas for 7.5 × 2.5-inch stock. Select a sample and press
+**Print**; it follows the active printer model and OCOM renderer exactly like
+an API print request. A 7.5-inch-wide layout requires a printer with a
+compatible print width. The OCOM OCBP-T4201 has a 4-inch-wide printhead, so
+that model requires the label to be rotated/redesigned with the 2.5-inch
+dimension across the printhead.
+
 Prefer the terminal? Run `sudo zplexpress setup` for the interactive wizard.
 The service listens on port **3000** by default.
 
