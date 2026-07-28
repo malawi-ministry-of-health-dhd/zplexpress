@@ -150,6 +150,22 @@ function finishClippedLabelPage(doc) {
   doc.restore();
 }
 
+// ZPL and EPL anchor a rotated field by the upper-left corner of the field as
+// rotated, so it always grows down and to the right of its origin. PDFKit
+// rotates about the origin instead, which sends 90 and 180 degree fields into
+// negative coordinates where the label clip discards them. Translating the
+// rotated box back puts the field where the label format asked for it.
+function rotateFieldOrigin(doc, degrees, x, y, width, height) {
+  if (!degrees) return;
+  const [offsetX, offsetY] = {
+    90: [height, 0],
+    180: [width, height],
+    270: [0, width],
+  }[degrees] || [0, 0];
+  doc.translate(offsetX, offsetY);
+  doc.rotate(degrees, { origin: [x, y] });
+}
+
 function findZplContentOrigins(commands, media) {
   const origins = [];
   let state = null;
@@ -369,12 +385,16 @@ function drawText(doc, state, value, warnings) {
       lineX += Math.max(0, blockWidth - lineWidth);
     }
 
-    let lineY = dotsToPoints(yDots, state.media.dpi);
+    const lineY = dotsToPoints(yDots, state.media.dpi);
     doc.save();
-    if (rotation !== 'N') {
-      const degrees = { R: 90, I: 180, B: 270 }[rotation] || 0;
-      doc.rotate(degrees, { origin: [lineX, lineY] });
-    }
+    rotateFieldOrigin(
+      doc,
+      { R: 90, I: 180, B: 270 }[rotation] || 0,
+      lineX,
+      lineY,
+      lineWidth,
+      dotsToPoints(fitted.metrics.heightDots, state.media.dpi),
+    );
     doc
       .font(fitted.metrics.fontName)
       .fontSize(fitted.metrics.fontSize)
@@ -564,6 +584,17 @@ async function renderZplToPdf(zpl, media = DEFAULT_MEDIA) {
   let pageIndex = 0;
   let pages = 0;
   let copies = 1;
+  let emptyFormats = 0;
+
+  // A label format only earns a page once it draws something. ZPL streams
+  // routinely open or close with a configuration-only format such as
+  // ^XA^JUS^XZ, and giving that a page makes the printer feed a blank label.
+  const openPage = () => {
+    if (pageOpen) return;
+    addClippedLabelPage(doc, pageWidth, pageHeight);
+    pageOpen = true;
+    pages += 1;
+  };
 
   for (const token of commands) {
     const command = token.command;
@@ -572,20 +603,22 @@ async function renderZplToPdf(zpl, media = DEFAULT_MEDIA) {
     if (command === '^XA') {
       if (pageOpen) {
         finishClippedLabelPage(doc);
+        pageOpen = false;
         warnings.push('Started a new ZPL label before the previous label had a ^XZ command');
       }
       state = baseState(normalizedMedia, contentOrigins[pageIndex]);
       pageIndex += 1;
-      addClippedLabelPage(doc, pageWidth, pageHeight);
-      pageOpen = true;
-      pages += 1;
       continue;
     }
     if (!state) continue;
     if (command === '^XZ') {
-      copies = Math.max(copies, state.copies);
-      finishClippedLabelPage(doc);
-      pageOpen = false;
+      if (pageOpen) {
+        copies = Math.max(copies, state.copies);
+        finishClippedLabelPage(doc);
+        pageOpen = false;
+      } else {
+        emptyFormats += 1;
+      }
       state = null;
       continue;
     }
@@ -664,15 +697,20 @@ async function renderZplToPdf(zpl, media = DEFAULT_MEDIA) {
         readable: false,
       };
     } else if (command === '^GB') {
+      openPage();
       drawBox(doc, state, args);
     } else if (command === '^GC') {
+      openPage();
       drawCircle(doc, state, args);
     } else if (command === '^GF') {
+      openPage();
       drawUncompressedGraphic(doc, state, args, warnings);
     } else if (command === '^PQ') {
       state.copies = clamp(integer(args.split(',')[0], 1), 1, 999);
     } else if (command === '^FD') {
       const value = state.hexIndicator ? decodeHexField(args, state.hexIndicator) : args;
+      if (!value.length) continue;
+      openPage();
       if (state.barcode) await drawBarcode(doc, state, value, warnings);
       else drawText(doc, state, value, warnings);
     } else if (command === '^FS') {
@@ -682,12 +720,17 @@ async function renderZplToPdf(zpl, media = DEFAULT_MEDIA) {
     }
   }
 
-  if (!pages) {
-    throw new TypeError('No complete ZPL label format was found');
-  }
   if (pageOpen) {
     finishClippedLabelPage(doc);
     warnings.push('The final ZPL label had no ^XZ command');
+  }
+  if (emptyFormats) {
+    warnings.push(
+      `Skipped ${emptyFormats} empty ZPL label format(s) that would have fed a blank label`,
+    );
+  }
+  if (!pages) {
+    throw new TypeError('No ZPL label format contained anything to print');
   }
 
   doc.end();
@@ -713,6 +756,7 @@ module.exports = {
   finishClippedLabelPage,
   normalizeMedia,
   renderZplToPdf,
+  rotateFieldOrigin,
   tokenize,
   wrapText,
 };

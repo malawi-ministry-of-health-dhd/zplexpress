@@ -109,6 +109,44 @@ test('locks the reported EPL sample to one top-left-anchored label page', async 
   assert.deepEqual(rendered.warnings, []);
 });
 
+test('keeps the rotated reverse-video Urgent flag on the accession label', async () => {
+  const rendered = await renderEplToPdf(MAHIS_ACCESSION_EPL, LABEL_4_X_1_57);
+  const pdfText = rendered.pdf.toString('latin1');
+
+  // " Urgent " normalizes to x=0 and is rotated 90 degrees. Rotating about the
+  // origin alone put its whole cell at negative x, where the label clip threw
+  // it away. Font 1 is 12 dots high, so the field is translated back by
+  // 12 dots (4.2562 pt) and stays on the label.
+  assert.match(pdfText, /1 0 0 1 4\.25\d+ 0 cm/);
+  assert.deepEqual(rendered.warnings, []);
+});
+
+test('drops empty EPL label formats instead of feeding blank labels', async () => {
+  const epl = [
+    'N', 'q801', 'Q329,026', 'P1',
+    'N', 'ZT', 'A35,30,0,3,1,1,N,"HELLO"', 'P1',
+  ].join('\n');
+  const rendered = await renderEplToPdf(epl, LABEL_4_X_1_57);
+  const physicalPages = rendered.pdf.toString('latin1').match(/\/Type \/Page\b/g) || [];
+
+  assert.equal(rendered.pages, 1);
+  assert.equal(physicalPages.length, 1);
+  assert.match(rendered.warnings.join(' | '), /Skipped 1 empty EPL label format/);
+});
+
+test('keeps content origins aligned with their own label after an empty format', async () => {
+  const epl = [
+    'N', 'q801', 'P1',
+    'N', 'ZT', 'A35,30,0,3,1,1,N,"HELLO"', 'P1',
+  ].join('\n');
+  const rendered = await renderEplToPdf(epl, LABEL_4_X_1_57);
+
+  // The skipped format still owns contentOrigins[0]; the drawn label must use
+  // its own origin, not the placeholder left by the empty one.
+  assert.deepEqual(rendered.contentOrigins, [{ x: 0, y: 0 }, { x: 35, y: 30 }]);
+  assert.match(rendered.pdf.toString('latin1'), /1 0 0 1 0 \d+(?:\.\d+)? Tm/);
+});
+
 test('rejects input without a complete EPL label frame', async () => {
   await assert.rejects(
     () => renderEplToPdf('A20,20,0,3,1,1,N,"not framed"', LABEL_4_X_1_5),

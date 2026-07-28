@@ -39,7 +39,7 @@ avoids the harmless `_apt` sandbox notice you get when installing from
 
 ```bash
 DRIVER_VER=1.0.3
-ZPLEXPRESS_VER=1.4.2
+ZPLEXPRESS_VER=1.4.3
 
 curl -fsSLO "https://github.com/malawi-ministry-of-health-dhd/linux_printer_driver/releases/download/v${DRIVER_VER}/ocom-ocbp-t4201-driver_${DRIVER_VER}_amd64.deb"
 curl -fsSLO "https://github.com/malawi-ministry-of-health-dhd/zplexpress/releases/download/v${ZPLEXPRESS_VER}/zplexpress_${ZPLEXPRESS_VER}_all.deb"

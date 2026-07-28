@@ -6,6 +6,7 @@ const assert = require('node:assert/strict');
 const {
   decodeHexField,
   renderZplToPdf,
+  rotateFieldOrigin,
   tokenize,
 } = require('../zpl-to-pdf');
 
@@ -84,6 +85,60 @@ test('locks ZPL to one label page and anchors its content at the PDF top-left', 
   }
   assert.match(pdfText, /0 0 288 113 re\s+W n/);
   assert.match(pdfText, /1 0 0 1 0 \d+(?:\.\d+)? Tm/);
+});
+
+test('anchors a rotated field by the top-left corner of the rotated field', () => {
+  const calls = [];
+  const doc = {
+    translate: (x, y) => calls.push(['translate', x, y]),
+    rotate: (degrees, options) => calls.push(['rotate', degrees, options.origin]),
+  };
+
+  // An unrotated field already starts at its origin.
+  rotateFieldOrigin(doc, 0, 10, 20, 100, 12);
+  assert.deepEqual(calls, []);
+
+  // Rotating about the origin alone would push these into negative
+  // coordinates, where the label clip discards them.
+  rotateFieldOrigin(doc, 90, 10, 20, 100, 12);
+  assert.deepEqual(calls, [['translate', 12, 0], ['rotate', 90, [10, 20]]]);
+
+  calls.length = 0;
+  rotateFieldOrigin(doc, 180, 10, 20, 100, 12);
+  assert.deepEqual(calls, [['translate', 100, 12], ['rotate', 180, [10, 20]]]);
+
+  calls.length = 0;
+  rotateFieldOrigin(doc, 270, 10, 20, 100, 12);
+  assert.deepEqual(calls, [['translate', 0, 100], ['rotate', 270, [10, 20]]]);
+});
+
+test('drops empty ZPL label formats instead of feeding blank labels', async () => {
+  const rendered = await renderZplToPdf(
+    '^XA^JUS^XZ^XA^FO50,50^A0N,30,30^FDHELLO^FS^XZ^XA^XZ',
+    LABEL_4_X_1_57,
+  );
+  const physicalPages = rendered.pdf.toString('latin1').match(/\/Type \/Page\b/g) || [];
+
+  assert.equal(rendered.pages, 1);
+  assert.equal(physicalPages.length, 1);
+  assert.match(rendered.warnings.join(' | '), /Skipped 2 empty ZPL label format/);
+});
+
+test('does not let an empty format inflate the copy count', async () => {
+  const rendered = await renderZplToPdf(
+    '^XA^PQ5^XZ^XA^FO50,50^A0N,30,30^FDHELLO^FS^XZ',
+    LABEL_4_X_1_57,
+  );
+
+  assert.equal(rendered.pages, 1);
+  assert.equal(rendered.copies, 1);
+});
+
+test('rejects a ZPL stream whose label formats all print nothing', async () => {
+  await assert.rejects(
+    () => renderZplToPdf('^XA^JUS^XZ^XA^XZ', LABEL_4_X_1_57),
+    /anything to print/,
+  );
 });
 
 test('rejects non-ZPL input', async () => {

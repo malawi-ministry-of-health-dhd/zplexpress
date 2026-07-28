@@ -10,6 +10,7 @@ const {
   dotsToPoints,
   finishClippedLabelPage,
   normalizeMedia,
+  rotateFieldOrigin,
 } = require('./zpl-to-pdf');
 
 const MAX_EPL_BYTES = 5 * 1024 * 1024;
@@ -83,7 +84,6 @@ function createState(media, contentOrigin = { x: 0, y: 0 }) {
     referenceY: 0,
     direction: 'ZT',
     copies: 1,
-    hasPrintableContent: false,
     contentOriginX: integer(contentOrigin.x),
     contentOriginY: integer(contentOrigin.y),
   };
@@ -189,7 +189,7 @@ function drawText(doc, state, fields, warnings) {
   }
 
   doc.save();
-  doc.rotate(degrees, { origin: [x, y] });
+  rotateFieldOrigin(doc, degrees, x, y, textWidth, textHeight);
   if (String(reverse).toUpperCase() === 'R') {
     doc.fillColor('black').rect(x, y, textWidth, textHeight).fill();
     doc.fillColor('white');
@@ -204,7 +204,6 @@ function drawText(doc, state, fields, warnings) {
       horizontalScaling: metrics.horizontalScaling,
     });
   doc.restore();
-  state.hasPrintableContent = true;
 }
 
 function barcodeType(value) {
@@ -271,14 +270,13 @@ async function drawBarcode(doc, state, fields, warnings) {
     const degrees = rotationDegrees(rotation);
 
     doc.save();
-    doc.rotate(degrees, { origin: [x, y] });
+    rotateFieldOrigin(doc, degrees, x, y, width, height);
     doc.image(png, x, y, {
       fit: [width, height],
       align: 'left',
       valign: 'top',
     });
     doc.restore();
-    state.hasPrintableContent = true;
 
     if (String(readableValue).toUpperCase() !== 'N') {
       drawText(doc, state, [
@@ -322,7 +320,6 @@ function drawLine(doc, state, fields, warnings) {
     )
     .fill()
     .restore();
-  state.hasPrintableContent = true;
 }
 
 function drawBox(doc, state, fields, warnings) {
@@ -353,7 +350,6 @@ function drawBox(doc, state, fields, warnings) {
     )
     .stroke()
     .restore();
-  state.hasPrintableContent = true;
 }
 
 async function renderEplToPdf(epl, media = DEFAULT_MEDIA) {
@@ -394,19 +390,30 @@ async function renderEplToPdf(epl, media = DEFAULT_MEDIA) {
   const contentOrigins = findEplContentOrigins(lines);
   let state = null;
   let pageOpen = false;
+  let formatIndex = 0;
   let pages = 0;
   let copies = 1;
+  let emptyFormats = 0;
+
+  // An EPL format only earns a page once it draws something. Setup-only
+  // formats are common in label streams, and giving one a page makes the
+  // printer feed a blank label.
+  const openPage = () => {
+    if (pageOpen) return;
+    addClippedLabelPage(doc, pageWidth, pageHeight);
+    pageOpen = true;
+    pages += 1;
+  };
 
   for (const line of lines) {
     if (/^N$/i.test(line)) {
       if (pageOpen) {
         finishClippedLabelPage(doc);
+        pageOpen = false;
         warnings.push('Started a new EPL label before the previous label had a P command');
       }
-      state = createState(normalizedMedia, contentOrigins[pages]);
-      addClippedLabelPage(doc, pageWidth, pageHeight);
-      pageOpen = true;
-      pages += 1;
+      state = createState(normalizedMedia, contentOrigins[formatIndex]);
+      formatIndex += 1;
       continue;
     }
     if (!state) continue;
@@ -414,9 +421,13 @@ async function renderEplToPdf(epl, media = DEFAULT_MEDIA) {
     const printMatch = line.match(/^P(\d+)(?:,\d+)?$/i);
     if (printMatch) {
       state.copies = clamp(integer(printMatch[1], 1), 1, 999);
-      copies = Math.max(copies, state.copies);
-      finishClippedLabelPage(doc);
-      pageOpen = false;
+      if (pageOpen) {
+        copies = Math.max(copies, state.copies);
+        finishClippedLabelPage(doc);
+        pageOpen = false;
+      } else {
+        emptyFormats += 1;
+      }
       state = null;
       continue;
     }
@@ -436,12 +447,16 @@ async function renderEplToPdf(epl, media = DEFAULT_MEDIA) {
         warnings.push('EPL ZB bottom-up feed direction is approximated on fixed PDF media');
       }
     } else if (/^A/i.test(line)) {
+      openPage();
       drawText(doc, state, parseCsv(line.slice(1)), warnings);
     } else if (/^B/i.test(line)) {
+      openPage();
       await drawBarcode(doc, state, parseCsv(line.slice(1)), warnings);
     } else if (/^LO/i.test(line)) {
+      openPage();
       drawLine(doc, state, parseCsv(line.slice(2)), warnings);
     } else if (/^X/i.test(line)) {
+      openPage();
       drawBox(doc, state, parseCsv(line.slice(1)), warnings);
     } else if (
       /^(?:S\d+|D\d+|OD|O|JF|I8,[A-Z],\d+)$/i.test(line)
@@ -457,7 +472,12 @@ async function renderEplToPdf(epl, media = DEFAULT_MEDIA) {
     finishClippedLabelPage(doc);
     warnings.push('The final EPL label had no P command');
   }
-  if (!pages) throw new TypeError('No EPL label format was found');
+  if (emptyFormats) {
+    warnings.push(
+      `Skipped ${emptyFormats} empty EPL label format(s) that would have fed a blank label`,
+    );
+  }
+  if (!pages) throw new TypeError('No EPL label format contained anything to print');
 
   doc.end();
   await completed;
