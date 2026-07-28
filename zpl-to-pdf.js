@@ -9,11 +9,11 @@ const POINTS_PER_INCH = 72;
 const MAX_ZPL_BYTES = 5 * 1024 * 1024;
 
 const DEFAULT_MEDIA = Object.freeze({
-  pageSize: 'w288h108',
+  pageSize: 'w288h113',
   widthMm: 101.6,
-  heightMm: 38.1,
+  heightMm: 113 * MM_PER_INCH / POINTS_PER_INCH,
   widthDots: 812,
-  heightDots: 305,
+  heightDots: 319,
   dpi: DPI,
 });
 

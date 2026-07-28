@@ -7,13 +7,13 @@ const execFileAsync = promisify(execFile);
 const OCOM_QUEUE = process.env.OCOM_PRINTER_NAME || 'OCOM_Ubuntu_Driver';
 const OCOM_ZPL_FORMAT = 'application/vnd.ocom-zpl';
 const PDF_FORMAT = 'application/pdf';
-const DEFAULT_MEDIA_NAME = 'w288h108';
+const DEFAULT_MEDIA_NAME = 'w288h113';
 const DEFAULT_MEDIA = Object.freeze({
   pageSize: DEFAULT_MEDIA_NAME,
   widthMm: 101.6,
-  heightMm: 38.1,
+  heightMm: 113 * 25.4 / 72,
   widthDots: 812,
-  heightDots: 305,
+  heightDots: 319,
   dpi: 203,
 });
 const COMMAND_OPTIONS = { encoding: 'utf8', maxBuffer: 1024 * 1024, timeout: 5000 };
@@ -125,6 +125,7 @@ function parsePageSize(pageSize) {
   const aliases = {
     '4x6': { widthMm: 101.6, heightMm: 152.4 },
     '4x1.5': { widthMm: 101.6, heightMm: 38.1 },
+    '4x1.57': { widthMm: 101.6, heightMm: 113 * 25.4 / 72 },
   };
   const alias = aliases[value.toLowerCase()];
   if (!alias) return null;
