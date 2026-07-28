@@ -39,7 +39,7 @@ avoids the harmless `_apt` sandbox notice you get when installing from
 
 ```bash
 DRIVER_VER=1.0.3
-ZPLEXPRESS_VER=1.4.1
+ZPLEXPRESS_VER=1.4.2
 
 curl -fsSLO "https://github.com/malawi-ministry-of-health-dhd/linux_printer_driver/releases/download/v${DRIVER_VER}/ocom-ocbp-t4201-driver_${DRIVER_VER}_amd64.deb"
 curl -fsSLO "https://github.com/malawi-ministry-of-health-dhd/zplexpress/releases/download/v${ZPLEXPRESS_VER}/zplexpress_${ZPLEXPRESS_VER}_all.deb"
@@ -92,7 +92,7 @@ Your printer/port config in `/etc/zplexpress/config.json` is preserved.
 
 Every push to `main` runs the tests, builds a Debian package, and creates a
 `build-<run number>` prerelease with the `.deb` attached. Pushing a version tag
-such as `v1.4.1` creates the normal versioned GitHub Release.
+such as `v1.4.2` creates the normal versioned GitHub Release.
 
 ## Development / manual setup
 
@@ -240,9 +240,12 @@ accepted, while `zpl` and `epl` remain supported for compatibility.
 
 For OCOM in the default `PDFRaster` mode, ZPLExpress detects ZPL or EPL, reads
 the selected CUPS `PageSize`, creates a PDF with that exact physical media box,
-and submits it as `application/pdf`. CUPS rasterizes the PDF and the OCOM
-driver produces TSPL. ZPL `^PW`/`^LL` and EPL `q`/`Q` remain logical
-coordinates and cannot change the physical label feed length.
+sets every PDF boundary box to that size, clips drawing to the label, removes
+the unused outer source-coordinate margin so the first content starts at the
+PDF top-left, and submits it as `application/pdf`. CUPS rasterizes the PDF and
+the OCOM driver produces TSPL. ZPL `^PW`/`^LL` and EPL `q`/`Q` remain logical
+coordinates and cannot change the physical label feed length. PDF submissions
+also explicitly disable banner sheets, duplexing, and multi-up layout.
 
 ```bash
 curl -X POST http://localhost:3000/print \
@@ -261,8 +264,10 @@ curl -X POST http://localhost:3000/render \
 
 EPL sent by MAHIS is accepted even when it is carried in the legacy `zpl`
 property. It is detected from the command contents and rendered with its
-reference offset, fixed EPL font metrics, lines, boxes, rotations, barcodes,
-and copies:
+relative reference layout, fixed EPL font metrics, lines, boxes, rotations,
+barcodes, and copies. Any unused positive reference/field offset surrounding
+the whole label is normalized away so the content is anchored at the PDF
+top-left:
 
 ```bash
 curl -X POST http://localhost:3000/render \

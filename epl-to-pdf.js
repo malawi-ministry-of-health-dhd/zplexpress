@@ -5,8 +5,10 @@ const bwipjs = require('bwip-js');
 
 const {
   DEFAULT_MEDIA,
+  addClippedLabelPage,
   dotsToMm,
   dotsToPoints,
+  finishClippedLabelPage,
   normalizeMedia,
 } = require('./zpl-to-pdf');
 
@@ -74,7 +76,7 @@ function tokenizeEpl(epl) {
     .filter(Boolean);
 }
 
-function createState(media) {
+function createState(media, contentOrigin = { x: 0, y: 0 }) {
   return {
     media,
     referenceX: 0,
@@ -82,23 +84,57 @@ function createState(media) {
     direction: 'ZT',
     copies: 1,
     hasPrintableContent: false,
+    contentOriginX: integer(contentOrigin.x),
+    contentOriginY: integer(contentOrigin.y),
   };
 }
 
 function absoluteOrigin(state, x, y) {
   return {
-    x: state.referenceX + integer(x),
-    y: state.referenceY + integer(y),
+    x: state.referenceX + integer(x) - state.contentOriginX,
+    y: state.referenceY + integer(y) - state.contentOriginY,
   };
 }
 
-function addClippedPage(doc, width, height) {
-  doc.addPage({ size: [width, height], margin: 0 });
-  doc.save().rect(0, 0, width, height).clip();
-}
+function findEplContentOrigins(lines) {
+  const origins = [];
+  let state = null;
+  let current = null;
 
-function finishClippedPage(doc) {
-  doc.restore();
+  function record(fields) {
+    if (!state || !current || fields.length < 2) return;
+    current.x = Math.min(current.x, state.referenceX + integer(fields[0]));
+    current.y = Math.min(current.y, state.referenceY + integer(fields[1]));
+  }
+
+  for (const line of lines) {
+    if (/^N$/i.test(line)) {
+      state = createState(DEFAULT_MEDIA);
+      current = { x: Number.POSITIVE_INFINITY, y: Number.POSITIVE_INFINITY };
+      origins.push(current);
+      continue;
+    }
+    if (!state) continue;
+    if (/^P\d+(?:,\d+)?$/i.test(line)) {
+      state = null;
+      current = null;
+      continue;
+    }
+    if (/^R-?\d+,-?\d+$/i.test(line)) {
+      const [x, y] = line.slice(1).split(',');
+      state.referenceX = integer(x);
+      state.referenceY = integer(y);
+    } else if (/^LO/i.test(line)) {
+      record(parseCsv(line.slice(2)));
+    } else if (/^[ABX]/i.test(line)) {
+      record(parseCsv(line.slice(1)));
+    }
+  }
+
+  return origins.map(origin => ({
+    x: Number.isFinite(origin.x) ? origin.x : 0,
+    y: Number.isFinite(origin.y) ? origin.y : 0,
+  }));
 }
 
 function textMetrics(font, horizontalMultiplier, verticalMultiplier, media) {
@@ -246,8 +282,8 @@ async function drawBarcode(doc, state, fields, warnings) {
 
     if (String(readableValue).toUpperCase() !== 'N') {
       drawText(doc, state, [
-        String(origin.x - state.referenceX),
-        String(origin.y - state.referenceY + heightDots + 2),
+        String(origin.x + state.contentOriginX - state.referenceX),
+        String(origin.y + state.contentOriginY - state.referenceY + heightDots + 2),
         rotation,
         '2',
         '1',
@@ -296,8 +332,8 @@ function drawBox(doc, state, fields, warnings) {
   }
   const [xValue, yValue, thicknessValue, rightValue, bottomValue] = fields;
   const origin = absoluteOrigin(state, xValue, yValue);
-  const right = state.referenceX + integer(rightValue);
-  const bottom = state.referenceY + integer(bottomValue);
+  const right = state.referenceX + integer(rightValue) - state.contentOriginX;
+  const bottom = state.referenceY + integer(bottomValue) - state.contentOriginY;
   const width = right - origin.x;
   const height = bottom - origin.y;
   if (width <= 0 || height <= 0) {
@@ -355,6 +391,7 @@ async function renderEplToPdf(epl, media = DEFAULT_MEDIA) {
   });
 
   const warnings = [];
+  const contentOrigins = findEplContentOrigins(lines);
   let state = null;
   let pageOpen = false;
   let pages = 0;
@@ -363,11 +400,11 @@ async function renderEplToPdf(epl, media = DEFAULT_MEDIA) {
   for (const line of lines) {
     if (/^N$/i.test(line)) {
       if (pageOpen) {
-        finishClippedPage(doc);
+        finishClippedLabelPage(doc);
         warnings.push('Started a new EPL label before the previous label had a P command');
       }
-      state = createState(normalizedMedia);
-      addClippedPage(doc, pageWidth, pageHeight);
+      state = createState(normalizedMedia, contentOrigins[pages]);
+      addClippedLabelPage(doc, pageWidth, pageHeight);
       pageOpen = true;
       pages += 1;
       continue;
@@ -378,7 +415,7 @@ async function renderEplToPdf(epl, media = DEFAULT_MEDIA) {
     if (printMatch) {
       state.copies = clamp(integer(printMatch[1], 1), 1, 999);
       copies = Math.max(copies, state.copies);
-      finishClippedPage(doc);
+      finishClippedLabelPage(doc);
       pageOpen = false;
       state = null;
       continue;
@@ -417,7 +454,7 @@ async function renderEplToPdf(epl, media = DEFAULT_MEDIA) {
   }
 
   if (pageOpen) {
-    finishClippedPage(doc);
+    finishClippedLabelPage(doc);
     warnings.push('The final EPL label had no P command');
   }
   if (!pages) throw new TypeError('No EPL label format was found');
@@ -429,6 +466,7 @@ async function renderEplToPdf(epl, media = DEFAULT_MEDIA) {
     pages,
     copies,
     media: normalizedMedia,
+    contentOrigins,
     warnings: [...new Set(warnings)],
   };
 }
@@ -436,6 +474,7 @@ async function renderEplToPdf(epl, media = DEFAULT_MEDIA) {
 module.exports = {
   EPL_FONT_METRICS,
   MAX_EPL_BYTES,
+  findEplContentOrigins,
   parseCsv,
   renderEplToPdf,
   tokenizeEpl,

@@ -18,6 +18,15 @@ const LABEL_4_X_1_5 = {
   dpi: 203,
 };
 
+const LABEL_4_X_1_57 = {
+  pageSize: 'w288h113',
+  widthMm: 101.6,
+  heightMm: 113 * 25.4 / 72,
+  widthDots: 812,
+  heightDots: 319,
+  dpi: 203,
+};
+
 test('tokenizes ZPL fields and decodes ^FH values', () => {
   assert.deepEqual(tokenize('^XA^FO10,5^FH_^FDJohn_20Doe^FS^XZ'), [
     { command: '^XA', args: '' },
@@ -56,6 +65,25 @@ test('renders Code 128 and honors ^PQ copies', async () => {
   assert.equal(rendered.copies, 2);
   assert.ok(rendered.pdf.length > 5000);
   assert.deepEqual(rendered.warnings, []);
+});
+
+test('locks ZPL to one label page and anchors its content at the PDF top-left', async () => {
+  const rendered = await renderZplToPdf(
+    '^XA^PW750^LL450^LH20,10^FO35,30^A0N,20,20^FDTOP LEFT^FS^PQ1^XZ',
+    LABEL_4_X_1_57,
+  );
+  const pdfText = rendered.pdf.toString('latin1');
+  const physicalPages = pdfText.match(/\/Type \/Page\b/g) || [];
+
+  assert.equal(rendered.pages, 1);
+  assert.equal(rendered.copies, 1);
+  assert.equal(physicalPages.length, 1);
+  assert.deepEqual(rendered.contentOrigins, [{ x: 55, y: 40 }]);
+  for (const box of ['MediaBox', 'CropBox', 'TrimBox', 'BleedBox', 'ArtBox']) {
+    assert.match(pdfText, new RegExp(`/${box} \\[0 0 288 113\\]`));
+  }
+  assert.match(pdfText, /0 0 288 113 re\s+W n/);
+  assert.match(pdfText, /1 0 0 1 0 \d+(?:\.\d+)? Tm/);
 });
 
 test('rejects non-ZPL input', async () => {

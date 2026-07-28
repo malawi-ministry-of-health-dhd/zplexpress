@@ -18,6 +18,15 @@ const LABEL_4_X_1_5 = {
   dpi: 203,
 };
 
+const LABEL_4_X_1_57 = {
+  pageSize: 'w288h113',
+  widthMm: 101.6,
+  heightMm: 113 * 25.4 / 72,
+  widthDots: 812,
+  heightDots: 319,
+  dpi: 203,
+};
+
 const MAHIS_ACCESSION_EPL = [
   'N',
   'q600',
@@ -71,6 +80,33 @@ test('renders MAHIS lines, multiple labels, and EPL P copies', async () => {
   assert.equal(rendered.pages, 2);
   assert.equal(rendered.copies, 2);
   assert.equal(pageMatches.length, 2);
+});
+
+test('locks the reported EPL sample to one top-left-anchored label page', async () => {
+  const epl = [
+    'N',
+    'q801',
+    'Q329,026',
+    'ZT',
+    'B50,110,0,1,3,8,120,N,"P100100000025"',
+    'A35,30,0,3,1,1,N,"John Banda (M)"',
+    'A35,76,0,3,1,1,N,"MRN: P100100000025  DOB: 1969-03-11"',
+    'P1',
+  ].join('\n');
+  const rendered = await renderEplToPdf(epl, LABEL_4_X_1_57);
+  const pdfText = rendered.pdf.toString('latin1');
+  const physicalPages = pdfText.match(/\/Type \/Page\b/g) || [];
+
+  assert.equal(rendered.pages, 1);
+  assert.equal(rendered.copies, 1);
+  assert.equal(physicalPages.length, 1);
+  assert.deepEqual(rendered.contentOrigins, [{ x: 35, y: 30 }]);
+  for (const box of ['MediaBox', 'CropBox', 'TrimBox', 'BleedBox', 'ArtBox']) {
+    assert.match(pdfText, new RegExp(`/${box} \\[0 0 288 113\\]`));
+  }
+  assert.match(pdfText, /0 0 288 113 re\s+W n/);
+  assert.match(pdfText, /1 0 0 1 0 \d+(?:\.\d+)? Tm/);
+  assert.deepEqual(rendered.warnings, []);
 });
 
 test('rejects input without a complete EPL label frame', async () => {

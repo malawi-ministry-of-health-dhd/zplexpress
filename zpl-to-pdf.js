@@ -78,7 +78,7 @@ function tokenize(zpl) {
   return commands;
 }
 
-function baseState(media) {
+function baseState(media, contentOrigin = { x: 0, y: 0 }) {
   return {
     media,
     x: 0,
@@ -96,6 +96,8 @@ function baseState(media) {
     barcodeDefaults: { module: 2, ratio: 3, height: 100 },
     hexIndicator: null,
     copies: 1,
+    contentOriginX: integer(contentOrigin.x),
+    contentOriginY: integer(contentOrigin.y),
   };
 }
 
@@ -105,11 +107,126 @@ function fontNameForZpl(font) {
     : 'Helvetica';
 }
 
-function absoluteOrigin(state) {
+function sourceOrigin(state) {
   return {
     x: state.labelHomeX + state.labelShift + state.x,
     y: state.labelHomeY + state.labelTop + state.y,
   };
+}
+
+function absoluteOrigin(state) {
+  const origin = sourceOrigin(state);
+  return {
+    x: origin.x - state.contentOriginX,
+    y: origin.y - state.contentOriginY,
+  };
+}
+
+function addClippedLabelPage(doc, width, height) {
+  const box = [0, 0, width, height];
+  doc.addPage({
+    size: [width, height],
+    margins: {
+      top: 0,
+      right: 0,
+      bottom: 0,
+      left: 0,
+    },
+  });
+
+  // Keep every standard PDF page boundary identical. CUPS and its PDF
+  // filters may select MediaBox, CropBox, or TrimBox; none may describe a
+  // sheet larger than the configured physical label.
+  doc.page.dictionary.data.MediaBox = [...box];
+  doc.page.dictionary.data.CropBox = [...box];
+  doc.page.dictionary.data.TrimBox = [...box];
+  doc.page.dictionary.data.BleedBox = [...box];
+  doc.page.dictionary.data.ArtBox = [...box];
+
+  doc.save().rect(0, 0, width, height).clip();
+}
+
+function finishClippedLabelPage(doc) {
+  doc.restore();
+}
+
+function findZplContentOrigins(commands, media) {
+  const origins = [];
+  let state = null;
+  let current = null;
+
+  function recordOrigin(useTextBaseline = false) {
+    if (!state || !current) return;
+    const origin = sourceOrigin(state);
+    const y = useTextBaseline && state.fieldIsBaseline
+      ? origin.y - state.font.height
+      : origin.y;
+    current.x = Math.min(current.x, origin.x);
+    current.y = Math.min(current.y, y);
+  }
+
+  for (const token of commands) {
+    const command = token.command;
+    const args = token.args;
+
+    if (command === '^XA') {
+      state = baseState(media);
+      current = { x: Number.POSITIVE_INFINITY, y: Number.POSITIVE_INFINITY };
+      origins.push(current);
+      continue;
+    }
+    if (!state) continue;
+    if (command === '^XZ') {
+      state = null;
+      current = null;
+      continue;
+    }
+
+    if (command === '^LH') {
+      const [x, y] = args.split(',');
+      state.labelHomeX = integer(x);
+      state.labelHomeY = integer(y);
+    } else if (command === '^LS') {
+      state.labelShift = integer(args);
+    } else if (command === '^LT') {
+      state.labelTop = integer(args);
+    } else if (command === '^FO' || command === '^FT') {
+      const [x, y] = args.split(',');
+      state.x = integer(x);
+      state.y = integer(y);
+      state.fieldIsBaseline = command === '^FT';
+      state.barcode = null;
+    } else if (command === '^CF') {
+      const [name = '0', height, width] = args.split(',');
+      state.defaultFont = {
+        name: name.toUpperCase(),
+        height: clamp(integer(height, state.defaultFont.height), 5, 1000),
+        width: clamp(integer(width, height || state.defaultFont.width), 1, 1000),
+      };
+      state.font = { ...state.defaultFont, rotation: state.defaultRotation };
+    } else if (/^\^A[A-Z0-9]$/.test(command)) {
+      const [rotation = state.defaultRotation, height, width] = args.split(',');
+      state.font = {
+        name: command[2],
+        rotation: String(rotation || state.defaultRotation).toUpperCase(),
+        height: clamp(integer(height, state.defaultFont.height), 5, 1000),
+        width: clamp(integer(width, height || state.defaultFont.width), 1, 1000),
+      };
+    } else if (command === '^BC' || command === '^B3' || command === '^BQ') {
+      state.barcode = { type: command.slice(1) };
+    } else if (command === '^GB' || command === '^GC' || command === '^GF') {
+      recordOrigin(false);
+    } else if (command === '^FD') {
+      recordOrigin(!state.barcode);
+    } else if (command === '^FS') {
+      state.barcode = null;
+    }
+  }
+
+  return origins.map(origin => ({
+    x: Number.isFinite(origin.x) ? origin.x : 0,
+    y: Number.isFinite(origin.y) ? origin.y : 0,
+  }));
 }
 
 function textMetrics(doc, state, scale = 1) {
@@ -441,7 +558,10 @@ async function renderZplToPdf(zpl, media = DEFAULT_MEDIA) {
 
   const warnings = [];
   const commands = tokenize(zpl);
+  const contentOrigins = findZplContentOrigins(commands, normalizedMedia);
   let state = null;
+  let pageOpen = false;
+  let pageIndex = 0;
   let pages = 0;
   let copies = 1;
 
@@ -450,14 +570,22 @@ async function renderZplToPdf(zpl, media = DEFAULT_MEDIA) {
     const args = token.args;
 
     if (command === '^XA') {
-      state = baseState(normalizedMedia);
-      doc.addPage({ size: [pageWidth, pageHeight], margin: 0 });
+      if (pageOpen) {
+        finishClippedLabelPage(doc);
+        warnings.push('Started a new ZPL label before the previous label had a ^XZ command');
+      }
+      state = baseState(normalizedMedia, contentOrigins[pageIndex]);
+      pageIndex += 1;
+      addClippedLabelPage(doc, pageWidth, pageHeight);
+      pageOpen = true;
       pages += 1;
       continue;
     }
     if (!state) continue;
     if (command === '^XZ') {
       copies = Math.max(copies, state.copies);
+      finishClippedLabelPage(doc);
+      pageOpen = false;
       state = null;
       continue;
     }
@@ -557,6 +685,10 @@ async function renderZplToPdf(zpl, media = DEFAULT_MEDIA) {
   if (!pages) {
     throw new TypeError('No complete ZPL label format was found');
   }
+  if (pageOpen) {
+    finishClippedLabelPage(doc);
+    warnings.push('The final ZPL label had no ^XZ command');
+  }
 
   doc.end();
   await completed;
@@ -565,6 +697,7 @@ async function renderZplToPdf(zpl, media = DEFAULT_MEDIA) {
     pages,
     copies,
     media: normalizedMedia,
+    contentOrigins,
     warnings: [...new Set(warnings)],
   };
 }
@@ -572,9 +705,12 @@ async function renderZplToPdf(zpl, media = DEFAULT_MEDIA) {
 module.exports = {
   DEFAULT_MEDIA,
   DPI,
+  addClippedLabelPage,
   decodeHexField,
   dotsToMm,
   dotsToPoints,
+  findZplContentOrigins,
+  finishClippedLabelPage,
   normalizeMedia,
   renderZplToPdf,
   tokenize,
