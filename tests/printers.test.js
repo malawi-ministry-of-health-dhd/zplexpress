@@ -10,11 +10,13 @@ const {
   buildPdfPrintArgs,
   buildPrintArgs,
   detectPrinterModel,
+  getPrinterMedia,
   getPrinterStatus,
   isOcomPrinter,
   parseConnectedDeviceUris,
   parseDeviceUri,
   parseLpOptions,
+  parseMarkedLpOption,
   parsePageSize,
   parsePrinters,
   submitPdf,
@@ -149,6 +151,44 @@ test('parses the configured CUPS page size for PDF rendering', () => {
   assert.equal(custom.heightMm, 25.4);
   assert.equal(custom.widthDots, 406);
   assert.equal(custom.heightDots, 203);
+});
+
+test('reads the active PageSize from detailed CUPS PPD options', () => {
+  const options = [
+    'PageSize/Media Size: w288h108 *w288h432 Custom.WIDTHxHEIGHT',
+    'Resolution/Resolution: *203dpi',
+  ].join('\n');
+
+  assert.equal(parseMarkedLpOption(options), 'w288h432');
+  assert.equal(
+    parseMarkedLpOption('media/Media Size: 4x1.5 *Custom.80x30mm'),
+    'Custom.80x30mm',
+  );
+  assert.equal(parseMarkedLpOption('Resolution/Resolution: *203dpi'), null);
+});
+
+test('falls back to detailed CUPS options when compact output omits PageSize', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zplexpress-media-test-'));
+  const oldPath = process.env.PATH;
+  const lpoptions = path.join(tempDir, 'lpoptions');
+  fs.writeFileSync(lpoptions, [
+    '#!/bin/sh',
+    'if [ "$3" = "-l" ]; then',
+    '  printf "%s\\n" "PageSize/Media Size: *w288h108 w288h432 Custom.WIDTHxHEIGHT"',
+    'else',
+    '  printf "%s\\n" "copies=1 ZPLFontMode=NoOversize"',
+    'fi',
+  ].join('\n'), { mode: 0o755 });
+  process.env.PATH = `${tempDir}:${oldPath}`;
+
+  try {
+    const media = await getPrinterMedia('OCBP-T4201-2');
+    assert.equal(media.pageSize, 'w288h108');
+    assert.equal(media.source, 'cups-detailed');
+  } finally {
+    process.env.PATH = oldPath;
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
 });
 
 test('builds a size-locked CUPS PDF job', () => {

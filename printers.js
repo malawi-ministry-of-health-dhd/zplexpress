@@ -66,6 +66,30 @@ function parseLpOptions(stdout) {
   return options;
 }
 
+function parseMarkedLpOption(stdout, optionNames = ['PageSize', 'media']) {
+  const accepted = new Set(optionNames.map(name => String(name).toLowerCase()));
+  for (const sourceLine of String(stdout || '').split('\n')) {
+    const line = sourceLine.trim();
+    const separator = line.indexOf(':');
+    if (separator < 1) continue;
+
+    const option = line
+      .slice(0, separator)
+      .split('/', 1)[0]
+      .trim()
+      .toLowerCase();
+    if (!accepted.has(option)) continue;
+
+    const marked = line
+      .slice(separator + 1)
+      .trim()
+      .split(/\s+/)
+      .find(choice => choice.startsWith('*') && choice.length > 1);
+    if (marked) return marked.slice(1);
+  }
+  return null;
+}
+
 function parsePageSize(pageSize) {
   const value = String(pageSize || '');
   let match = value.match(/^w(\d+(?:\.\d+)?)h(\d+(?:\.\d+)?)$/i);
@@ -209,20 +233,39 @@ async function getPrinterDeviceUri(name) {
 async function getPrinterMedia(name) {
   if (!name) return { ...DEFAULT_MEDIA, source: 'default' };
 
+  let normalOptionsAvailable = false;
   try {
     const { stdout } = await execFileAsync('lpoptions', ['-p', name], COMMAND_OPTIONS);
+    normalOptionsAvailable = true;
     const options = parseLpOptions(stdout);
     const pageSize = options.PageSize || options.media;
     const media = parsePageSize(pageSize);
-    return media
-      ? { ...media, source: 'cups' }
-      : { ...DEFAULT_MEDIA, source: 'default' };
+    if (media) return { ...media, source: 'cups' };
   } catch (error) {
     if (/unknown destination|not found/i.test(commandOutput(error))) {
       return { ...DEFAULT_MEDIA, source: 'default' };
     }
     throw error;
   }
+
+  // Some CUPS queues omit PageSize from the compact option output. The
+  // detailed PPD list marks the active choice with an asterisk:
+  //   PageSize/Media Size: *w288h108 w288h432 Custom.WIDTHxHEIGHT
+  try {
+    const { stdout } = await execFileAsync(
+      'lpoptions',
+      ['-p', name, '-l'],
+      COMMAND_OPTIONS,
+    );
+    const media = parsePageSize(parseMarkedLpOption(stdout));
+    if (media) return { ...media, source: 'cups-detailed' };
+  } catch (error) {
+    if (!normalOptionsAvailable && !/unknown destination|not found/i.test(commandOutput(error))) {
+      throw error;
+    }
+  }
+
+  return { ...DEFAULT_MEDIA, source: 'default' };
 }
 
 async function listConnectedDeviceUris() {
@@ -469,6 +512,7 @@ module.exports = {
   parseConnectedDeviceUris,
   parseDeviceUri,
   parseLpOptions,
+  parseMarkedLpOption,
   parsePageSize,
   parsePrinters,
   printerExists,
