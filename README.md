@@ -38,7 +38,7 @@ avoids the harmless `_apt` sandbox notice you get when installing from
 
 ```bash
 DRIVER_VER=1.0.3
-ZPLEXPRESS_VER=1.2.1
+ZPLEXPRESS_VER=1.3.0
 
 curl -fsSLO "https://github.com/malawi-ministry-of-health-dhd/linux_printer_driver/releases/download/v${DRIVER_VER}/ocom-ocbp-t4201-driver_${DRIVER_VER}_amd64.deb"
 curl -fsSLO "https://github.com/malawi-ministry-of-health-dhd/zplexpress/releases/download/v${ZPLEXPRESS_VER}/zplexpress_${ZPLEXPRESS_VER}_all.deb"
@@ -81,7 +81,7 @@ Your printer/port config in `/etc/zplexpress/config.json` is preserved.
 
 Every push to `main` runs the tests, builds a Debian package, and creates a
 `build-<run number>` prerelease with the `.deb` attached. Pushing a version tag
-such as `v1.2.1` creates the normal versioned GitHub Release.
+such as `v1.3.0` creates the normal versioned GitHub Release.
 
 ## Development / manual setup
 
@@ -194,6 +194,39 @@ with `RUN_USER` / `RUN_GROUP` set.
 Once the service is running, you can send ZPL commands to your configured
 printer through the API endpoints. ARGOX and ZEBRA jobs are submitted with
 `lp -o raw`; ZPLExpress does not translate their ZPL.
+
+### ZPL and EPL detection
+
+ZPLExpress inspects the command contents before selecting an OCOM print path.
+It does not trust the request property name because MAHIS currently sends both
+ZPL and EPL strings in the legacy `zpl` JSON property.
+
+- ZPL is recognized from formats containing `^XA`, `^XZ`, and caret commands.
+- EPL is recognized from its line-oriented `N`, `q`, `Q`, `A`, `B`, and `P`
+  commands.
+- ARGOX and ZEBRA receive detected ZPL or EPL unchanged through the raw queue.
+- OCOM accepts ZPL through its selected renderer.
+- OCOM currently rejects detected EPL with HTTP `422` before anything reaches
+  CUPS. An EPL-to-TSPL or EPL-to-PDF translator is required before EPL can be
+  printed safely on OCOM.
+
+The dashboard shows the language and outcome of the last command. You can also
+detect a payload without printing:
+
+```bash
+curl -X POST http://localhost:3000/detect-language \
+  -H 'Content-Type: application/json' \
+  --data '{"zpl":"N\nq600\nQ230,20\nA20,20,0,3,1,1,N,\"EPL TEST\"\nP1"}'
+```
+
+Example response:
+
+```json
+{"language":"EPL","confidence":"high","indicators":["N","q width","Q length","A text","P print"]}
+```
+
+The language-neutral `commands` or `data` request properties are also
+accepted, while `zpl` and `epl` remain supported for compatibility.
 
 For OCOM in the default `PDFRaster` mode, ZPLExpress reads the selected CUPS
 `PageSize`, creates a PDF with that exact physical media box, and submits it as

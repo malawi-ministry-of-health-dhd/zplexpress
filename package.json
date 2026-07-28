@@ -1,7 +1,7 @@
 {
   "name": "zpl",
-  "version": "1.2.1",
-  "description": "Local ZPL-to-PDF and ZPL-to-TSPL printing service for CUPS",
+  "version": "1.3.0",
+  "description": "ZPL/EPL-aware printing service with local OCOM rendering for CUPS",
   "main": "main.js",
   "scripts": {
     "setup": "node main.js setup",

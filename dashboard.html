@@ -88,6 +88,7 @@
       <div class="row"><span class="k">State</span><span class="v" id="printer-state">—</span></div>
       <div class="row"><span class="k">Connection</span><span class="v" id="printer-connection">—</span></div>
       <div class="row"><span class="k">Print path</span><span class="v" id="printer-driver">—</span></div>
+      <div class="row"><span class="k">Last command</span><span class="v" id="last-command-language">—</span></div>
       <div class="row" id="render-mode-row" hidden>
         <span class="k">OCOM renderer</span>
         <span class="v">
@@ -316,6 +317,10 @@
         }
         document.getElementById('printer-driver').textContent = printer.driver || '—';
         document.getElementById('printer-device').textContent = printer.deviceUri || '—';
+        const lastCommand = data.lastCommand;
+        document.getElementById('last-command-language').textContent = lastCommand
+          ? lastCommand.language + ' — ' + lastCommand.outcome
+          : '—';
         if (
           data.printerModel
           && document.activeElement !== printerModelSelect

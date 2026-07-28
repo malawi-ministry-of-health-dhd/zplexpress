@@ -21,3 +21,8 @@ test('OCOM renderer is initially hidden and only shown for the OCOM model', () =
     /renderModeRow\.hidden = printerModel !== 'OCOM';/,
   );
 });
+
+test('dashboard exposes the most recently detected command language', () => {
+  assert.match(dashboard, /id="last-command-language"/);
+  assert.match(dashboard, /lastCommand\.language \+ ' — ' \+ lastCommand\.outcome/);
+});

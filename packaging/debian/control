@@ -7,8 +7,8 @@ Depends: nodejs (>= 18.0.0), cups, cups-client, xdg-utils
 Suggests: ocom-ocbp-t4201-driver (>= 1.0.3)
 Maintainer: Louis Nyirongo <louisnyirongo@lukeinternational.no>
 Homepage: https://github.com/malawi-ministry-of-health-dhd/zplexpress
-Description: ZPL printing service for ARGOX, ZEBRA, and OCOM printers
- A Node.js service that receives ZPL (Zebra Programming Language) over HTTP
- and prints to CUPS. ARGOX and ZEBRA receive raw ZPL, while OCOM OCBP-T4201
- jobs can be rendered locally to exact-size PDF or routed through the
- installed ZPL-to-TSPL translator.
+Description: ZPL/EPL-aware service for ARGOX, ZEBRA, and OCOM printers
+ A Node.js service that detects ZPL and EPL commands received over HTTP and
+ prints through CUPS. ARGOX and ZEBRA receive raw commands, while supported
+ OCOM ZPL jobs can be rendered locally to exact-size PDF or routed through
+ the installed ZPL-to-TSPL translator.

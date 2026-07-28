@@ -30,6 +30,11 @@ const {
 } = require('./printers');
 const { runWizard } = require('./setup');
 const { renderZplToPdf } = require('./zpl-to-pdf');
+const {
+  COMMAND_LANGUAGES,
+  detectCommandLanguage,
+  extractCommandData,
+} = require('./command-language');
 
 function isPortFree(port) {
   return new Promise(resolve => {
@@ -47,11 +52,12 @@ async function findAvailablePort(desired, maxTries = 50) {
   return 0;
 }
 
-function validateZpl(value) {
-  if (!value || typeof value !== 'string' || value.trim() === '') {
-    throw new TypeError('ZPL data is required in the request body');
-  }
-  return value;
+function inspectCommandRequest(body) {
+  const commands = extractCommandData(body);
+  return {
+    commands,
+    detection: detectCommandLanguage(commands),
+  };
 }
 
 function describePrintPath(printerModel, renderMode) {
@@ -111,14 +117,18 @@ async function startServer(config) {
     || detectPrinterModel(config.printerName);
   let currentPort = config.port;
   let renderMode = normalizeRenderMode(config.renderMode);
+  let lastCommand = null;
   let httpServer;
 
-  const persistConfig = () => saveConfig({
-    printerName,
-    printerModel,
-    port: currentPort,
-    renderMode,
-  });
+  const persistConfig = () => {
+    if (config.persist === false) return;
+    saveConfig({
+      printerName,
+      printerModel,
+      port: currentPort,
+      renderMode,
+    });
+  };
 
   console.log(
     `Starting server (preferred port: ${currentPort}, printer: ${printerName}, model: ${printerModel})`,
@@ -168,6 +178,7 @@ async function startServer(config) {
         port: currentPort,
         printerModel,
         renderMode,
+        lastCommand,
         printer: {
           name: printerName,
           ...printer,
@@ -184,6 +195,15 @@ async function startServer(config) {
 
   app.get('/test', (req, res) => {
     res.status(200).json({ status: 'Server is running' });
+  });
+
+  app.post('/detect-language', (req, res) => {
+    try {
+      const { detection } = inspectCommandRequest(req.body);
+      return res.status(200).json(detection);
+    } catch (error) {
+      return res.status(400).json({ error: error.message, message: error.message });
+    }
   });
 
   app.get('/printers', async (req, res) => {
@@ -301,8 +321,27 @@ async function startServer(config) {
   // that will enter CUPS and is useful when tuning a label layout.
   app.post('/render', async (req, res) => {
     try {
-      const zpl = validateZpl(req.body.zpl);
-      const rendered = await renderLabel(zpl);
+      const { commands, detection } = inspectCommandRequest(req.body);
+      lastCommand = {
+        ...detection,
+        outcome: detection.language === COMMAND_LANGUAGES.ZPL
+          ? 'PDF preview rendered'
+          : 'PDF preview rejected',
+        detectedAt: new Date().toISOString(),
+      };
+      if (detection.language !== COMMAND_LANGUAGES.ZPL) {
+        const message = detection.language === COMMAND_LANGUAGES.EPL
+          ? 'EPL commands were detected. The PDF preview endpoint currently renders ZPL only.'
+          : 'The command language could not be identified as ZPL.';
+        return res.status(415).json({
+          error: message,
+          message,
+          commandLanguage: detection.language,
+          printed: false,
+        });
+      }
+
+      const rendered = await renderLabel(commands);
       res
         .status(200)
         .type('application/pdf')
@@ -320,10 +359,45 @@ async function startServer(config) {
   });
 
   app.post('/print', async (req, res) => {
-    let zpl;
+    let commands;
+    let detection;
     let requestedMode = null;
     try {
-      zpl = validateZpl(req.body.zpl);
+      ({ commands, detection } = inspectCommandRequest(req.body));
+      lastCommand = {
+        ...detection,
+        outcome: 'received',
+        detectedAt: new Date().toISOString(),
+      };
+
+      if (printerModel === PRINTER_MODELS.OCOM) {
+        console.log(
+          `Detected ${detection.language} command language for the OCOM print request`,
+        );
+        if (detection.language === COMMAND_LANGUAGES.EPL) {
+          const message = 'EPL commands were detected. The OCOM printer requires an EPL-to-TSPL or EPL-to-PDF translator, so this job was not printed.';
+          lastCommand.outcome = 'rejected: EPL is not yet supported by the OCOM renderer';
+          return res.status(422).json({
+            error: message,
+            message,
+            commandLanguage: detection.language,
+            confidence: detection.confidence,
+            printed: false,
+          });
+        }
+        if (detection.language !== COMMAND_LANGUAGES.ZPL) {
+          const message = 'The command language could not be identified as ZPL or EPL. The OCOM job was not printed.';
+          lastCommand.outcome = 'rejected: unknown command language';
+          return res.status(415).json({
+            error: message,
+            message,
+            commandLanguage: detection.language,
+            confidence: detection.confidence,
+            printed: false,
+          });
+        }
+      }
+
       if (printerModel === PRINTER_MODELS.OCOM) {
         requestedMode = normalizeRenderMode(req.body.renderMode ?? renderMode);
       }
@@ -365,7 +439,7 @@ async function startServer(config) {
       let media = null;
       const route = resolvePrintRoute(printerModel, requestedMode);
       if (route === PRINT_ROUTES.OCOM_PDF_RASTER) {
-        const rendered = await renderLabel(zpl);
+        const rendered = await renderLabel(commands);
         result = await submitPdf(
           printerName,
           rendered.pdf,
@@ -376,27 +450,34 @@ async function startServer(config) {
         warnings = rendered.warnings;
         media = rendered.media;
       } else if (route === PRINT_ROUTES.OCOM_NATIVE_TSPL) {
-        result = await submitZpl(printerName, zpl, true);
+        result = await submitZpl(printerName, commands, true);
         driver = describePrintPath(printerModel, requestedMode);
       } else {
-        // ARGOX and ZEBRA both implement ZPL and must receive it unchanged.
-        result = await submitZpl(printerName, zpl, false);
-        driver = describePrintPath(printerModel, null);
+        // ARGOX and ZEBRA receive the detected ZPL or EPL bytes unchanged.
+        result = await submitZpl(printerName, commands, false);
+        driver = `${printerModel} raw ${detection.language}`;
       }
 
+      lastCommand.outcome = 'submitted';
+      lastCommand.jobId = result.jobId;
       console.log(
-        `Submitted ${result.jobId || 'print job'} to ${printerName} using ${driver}`,
+        `Submitted ${detection.language} ${result.jobId || 'print job'} to ${printerName} using ${driver}`,
       );
       return res.status(200).json({
         message: `Label sent to printer: ${printerName}`,
         jobId: result.jobId,
         driver,
         printerModel,
+        commandLanguage: detection.language,
+        confidence: detection.confidence,
         renderMode: printerModel === PRINTER_MODELS.OCOM ? requestedMode : 'RawZPL',
         media,
         warnings,
       });
     } catch (error) {
+      if (lastCommand && lastCommand.outcome === 'received') {
+        lastCommand.outcome = `failed: ${error.message}`;
+      }
       console.error(`Print error: ${error.message}`);
       return res.status(500).json({
         error: `Failed to print label: ${error.message}`,
@@ -418,13 +499,21 @@ async function startServer(config) {
     persistConfig();
   }
   console.log(`Server is running on http://localhost:${currentPort}`);
+  return { app, httpServer };
 }
 
-main().catch(error => {
-  if (error && error.name === 'ExitPromptError') {
-    console.log('\nSetup cancelled.');
-    process.exit(0);
-  }
-  console.error(error);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch(error => {
+    if (error && error.name === 'ExitPromptError') {
+      console.log('\nSetup cancelled.');
+      process.exit(0);
+    }
+    console.error(error);
+    process.exit(1);
+  });
+}
+
+module.exports = {
+  inspectCommandRequest,
+  startServer,
+};
