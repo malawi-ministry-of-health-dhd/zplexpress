@@ -79,8 +79,8 @@
         <span class="k">Printer model</span>
         <span class="v">
           <select id="printer-model-select">
-            <option value="ARGOX">ARGOX — raw ZPL</option>
-            <option value="ZEBRA">ZEBRA — raw ZPL</option>
+            <option value="ARGOX">ARGOX — raw ZPL/EPL</option>
+            <option value="ZEBRA">ZEBRA — raw ZPL/EPL</option>
             <option value="OCOM">OCOM — renderer</option>
           </select>
         </span>
@@ -214,7 +214,7 @@
         updateRendererVisibility(data.printerModel);
         printerModelMsg.textContent = data.printerModel === 'OCOM'
           ? 'OCOM selected — choose the renderer below.'
-          : data.printerModel + ' selected — ZPL will be sent directly.';
+          : data.printerModel + ' selected — ZPL/EPL will be sent directly.';
         printerModelMsg.className = 'msg ok';
         printerModelMsg.hidden = false;
         refresh();

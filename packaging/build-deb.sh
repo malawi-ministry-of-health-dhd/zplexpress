@@ -25,7 +25,7 @@ echo "Building ${PKG} ${VERSION}"
 
 # --- Application files -------------------------------------------------------
 mkdir -p "$APP_DIR"
-cp main.js config.js printers.js setup.js command-language.js zpl-to-pdf.js dashboard.html \
+cp main.js config.js printers.js setup.js command-language.js zpl-to-pdf.js epl-to-pdf.js dashboard.html \
    package.json package-lock.json "$APP_DIR/"
 
 # Bundle production dependencies (no dev deps, no native modules remain).

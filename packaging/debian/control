@@ -10,5 +10,5 @@ Homepage: https://github.com/malawi-ministry-of-health-dhd/zplexpress
 Description: ZPL/EPL-aware service for ARGOX, ZEBRA, and OCOM printers
  A Node.js service that detects ZPL and EPL commands received over HTTP and
  prints through CUPS. ARGOX and ZEBRA receive raw commands, while supported
- OCOM ZPL jobs can be rendered locally to exact-size PDF or routed through
- the installed ZPL-to-TSPL translator.
+ OCOM ZPL and EPL jobs can be rendered locally to exact-size PDF. OCOM ZPL
+ jobs can alternatively use the installed native ZPL-to-TSPL translator.

@@ -30,6 +30,7 @@ const {
 } = require('./printers');
 const { runWizard } = require('./setup');
 const { renderZplToPdf } = require('./zpl-to-pdf');
+const { renderEplToPdf } = require('./epl-to-pdf');
 const {
   COMMAND_LANGUAGES,
   detectCommandLanguage,
@@ -60,13 +61,13 @@ function inspectCommandRequest(body) {
   };
 }
 
-function describePrintPath(printerModel, renderMode) {
+function describePrintPath(printerModel, renderMode, commandLanguage = null) {
   if (printerModel === PRINTER_MODELS.OCOM) {
     return renderMode === RENDER_MODES.PDF_RASTER
-      ? 'OCOM PDFRaster → CUPS raster → TSPL'
+      ? `OCOM ${commandLanguage || 'ZPL/EPL'} → PDFRaster → CUPS raster → TSPL`
       : 'OCOM NativeTSPL → ZPL-to-TSPL';
   }
-  return `${printerModel} raw ZPL`;
+  return `${printerModel} raw ${commandLanguage || 'ZPL/EPL'}`;
 }
 
 async function main() {
@@ -147,10 +148,17 @@ async function startServer(config) {
     return printerName;
   }
 
-  async function renderLabel(zpl) {
+  async function renderLabel(commands, commandLanguage) {
     await ensurePrinterSelection();
     const media = await getPrinterMedia(printerName);
-    const rendered = await renderZplToPdf(zpl, media);
+    let rendered;
+    if (commandLanguage === COMMAND_LANGUAGES.ZPL) {
+      rendered = await renderZplToPdf(commands, media);
+    } else if (commandLanguage === COMMAND_LANGUAGES.EPL) {
+      rendered = await renderEplToPdf(commands, media);
+    } else {
+      throw new TypeError('The command language must be identified as ZPL or EPL');
+    }
     if (media.source === 'default') {
       rendered.warnings.push(
         'CUPS PageSize was unavailable; used the default 101.6 x 38.1 mm media',
@@ -322,17 +330,19 @@ async function startServer(config) {
   app.post('/render', async (req, res) => {
     try {
       const { commands, detection } = inspectCommandRequest(req.body);
+      const supported = [
+        COMMAND_LANGUAGES.ZPL,
+        COMMAND_LANGUAGES.EPL,
+      ].includes(detection.language);
       lastCommand = {
         ...detection,
-        outcome: detection.language === COMMAND_LANGUAGES.ZPL
+        outcome: supported
           ? 'PDF preview rendered'
           : 'PDF preview rejected',
         detectedAt: new Date().toISOString(),
       };
-      if (detection.language !== COMMAND_LANGUAGES.ZPL) {
-        const message = detection.language === COMMAND_LANGUAGES.EPL
-          ? 'EPL commands were detected. The PDF preview endpoint currently renders ZPL only.'
-          : 'The command language could not be identified as ZPL.';
+      if (!supported) {
+        const message = 'The command language could not be identified as ZPL or EPL.';
         return res.status(415).json({
           error: message,
           message,
@@ -341,14 +351,16 @@ async function startServer(config) {
         });
       }
 
-      const rendered = await renderLabel(commands);
+      const rendered = await renderLabel(commands, detection.language);
+      const languageHeader = `X-${detection.language}`;
       res
         .status(200)
         .type('application/pdf')
         .set('Content-Disposition', 'inline; filename="zplexpress-label.pdf"')
-        .set('X-ZPL-Pages', String(rendered.pages))
+        .set('X-Command-Language', detection.language)
+        .set(`${languageHeader}-Pages`, String(rendered.pages))
         .set(
-          'X-ZPL-Warnings',
+          `${languageHeader}-Warnings`,
           encodeURIComponent(rendered.warnings.join(' | ')).slice(0, 4000),
         )
         .send(rendered.pdf);
@@ -371,12 +383,16 @@ async function startServer(config) {
       };
 
       if (printerModel === PRINTER_MODELS.OCOM) {
+        requestedMode = normalizeRenderMode(req.body.renderMode ?? renderMode);
         console.log(
           `Detected ${detection.language} command language for the OCOM print request`,
         );
-        if (detection.language === COMMAND_LANGUAGES.EPL) {
-          const message = 'EPL commands were detected. The OCOM printer requires an EPL-to-TSPL or EPL-to-PDF translator, so this job was not printed.';
-          lastCommand.outcome = 'rejected: EPL is not yet supported by the OCOM renderer';
+        if (
+          detection.language === COMMAND_LANGUAGES.EPL
+          && requestedMode !== RENDER_MODES.PDF_RASTER
+        ) {
+          const message = 'EPL commands were detected, but OCOM NativeTSPL only translates ZPL. Select the PDFRaster renderer to convert EPL to PDF before printing.';
+          lastCommand.outcome = 'rejected: EPL requires OCOM PDFRaster';
           return res.status(422).json({
             error: message,
             message,
@@ -385,7 +401,7 @@ async function startServer(config) {
             printed: false,
           });
         }
-        if (detection.language !== COMMAND_LANGUAGES.ZPL) {
+        if (![COMMAND_LANGUAGES.ZPL, COMMAND_LANGUAGES.EPL].includes(detection.language)) {
           const message = 'The command language could not be identified as ZPL or EPL. The OCOM job was not printed.';
           lastCommand.outcome = 'rejected: unknown command language';
           return res.status(415).json({
@@ -398,9 +414,6 @@ async function startServer(config) {
         }
       }
 
-      if (printerModel === PRINTER_MODELS.OCOM) {
-        requestedMode = normalizeRenderMode(req.body.renderMode ?? renderMode);
-      }
     } catch (error) {
       return res.status(400).json({ error: error.message });
     }
@@ -439,19 +452,19 @@ async function startServer(config) {
       let media = null;
       const route = resolvePrintRoute(printerModel, requestedMode);
       if (route === PRINT_ROUTES.OCOM_PDF_RASTER) {
-        const rendered = await renderLabel(commands);
+        const rendered = await renderLabel(commands, detection.language);
         result = await submitPdf(
           printerName,
           rendered.pdf,
           rendered.media,
           rendered.copies,
         );
-        driver = 'OCOM PDFRaster → CUPS raster → TSPL';
+        driver = describePrintPath(printerModel, requestedMode, detection.language);
         warnings = rendered.warnings;
         media = rendered.media;
       } else if (route === PRINT_ROUTES.OCOM_NATIVE_TSPL) {
         result = await submitZpl(printerName, commands, true);
-        driver = describePrintPath(printerModel, requestedMode);
+        driver = describePrintPath(printerModel, requestedMode, detection.language);
       } else {
         // ARGOX and ZEBRA receive the detected ZPL or EPL bytes unchanged.
         result = await submitZpl(printerName, commands, false);
