@@ -4,11 +4,12 @@ Section: utils
 Priority: optional
 Architecture: all
 Depends: nodejs (>= 18.0.0), cups, cups-client, xdg-utils
-Suggests: ocom-ocbp-t4201-driver (>= 1.1.0)
+Suggests: ocom-ocbp-t4201-driver (>= 1.1.1)
 Maintainer: Louis Nyirongo <louisnyirongo@lukeinternational.no>
 Homepage: https://github.com/malawi-ministry-of-health-dhd/zplexpress
 Description: ZPL/EPL-aware service for ARGOX, ZEBRA, and OCOM printers
  A Node.js service that detects ZPL and EPL commands received over HTTP and
  prints through CUPS. ARGOX and ZEBRA receive raw commands. OCOM receives the
- original commands through language-specific CUPS MIME types so the installed
- OCOM driver can render an exact-size PDF and produce printer-native TSPL.
+ original commands through language-specific CUPS MIME types with one outer
+ CUPS copy so the installed OCOM driver can render an exact-size PDF and
+ produce printer-native TSPL without inheriting a duplicate queue copy count.

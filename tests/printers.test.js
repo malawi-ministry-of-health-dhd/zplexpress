@@ -102,6 +102,8 @@ test('routes OCOM through language MIME filters and ARGOX/ZEBRA as raw commands'
   assert.deepEqual(buildPrintArgs('OCOM_Ubuntu_Driver', 'ZPL'), [
     '-d',
     'OCOM_Ubuntu_Driver',
+    '-n',
+    '1',
     '-t',
     'ZPLExpress label',
     '-o',
@@ -112,6 +114,8 @@ test('routes OCOM through language MIME filters and ARGOX/ZEBRA as raw commands'
   assert.deepEqual(buildPrintArgs('OCOM_Ubuntu_Driver', 'EPL'), [
     '-d',
     'OCOM_Ubuntu_Driver',
+    '-n',
+    '1',
     '-t',
     'ZPLExpress label',
     '-o',
@@ -122,6 +126,8 @@ test('routes OCOM through language MIME filters and ARGOX/ZEBRA as raw commands'
   assert.deepEqual(buildPrintArgs('Zebra_GK420d'), [
     '-d',
     'Zebra_GK420d',
+    '-n',
+    '1',
     '-t',
     'ZPLExpress label',
     '-o',
@@ -132,6 +138,8 @@ test('routes OCOM through language MIME filters and ARGOX/ZEBRA as raw commands'
   assert.deepEqual(buildPrintArgs('Argox_OS-2140'), [
     '-d',
     'Argox_OS-2140',
+    '-n',
+    '1',
     '-t',
     'ZPLExpress label',
     '-o',
@@ -218,7 +226,8 @@ test('keeps a printer name as one lp argument instead of executing a shell', () 
   const args = buildPrintArgs(unsafeLookingName, 'ZPL');
 
   assert.equal(args[1], unsafeLookingName);
-  assert.equal(args.length, 7);
+  assert.deepEqual(args.slice(2, 4), ['-n', '1']);
+  assert.equal(args.length, 9);
 });
 
 test('detects a plugged OCOM device and submits unchanged ZPL through the driver', async () => {

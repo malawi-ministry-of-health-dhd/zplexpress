@@ -387,7 +387,12 @@ function buildPrintArgs(printerName, commandLanguage = null) {
     throw new TypeError('A printer name is required');
   }
 
-  const args = ['-d', printerName, '-t', 'ZPLExpress label'];
+  /*
+   * Embedded ^PQ/P quantities are handled by the printer language/OCOM
+   * renderer. Force the outer CUPS job to one copy so a saved lpoptions
+   * copies=2 value cannot duplicate an otherwise single-label request.
+   */
+  const args = ['-d', printerName, '-n', '1', '-t', 'ZPLExpress label'];
   if (commandLanguage) {
     const documentFormat = OCOM_COMMAND_FORMATS[String(commandLanguage).toUpperCase()];
     if (!documentFormat) {
