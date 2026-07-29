@@ -1,12 +1,17 @@
 const { execFile, spawn } = require('child_process');
 const { promisify } = require('util');
 const { PRINTER_MODELS } = require('./config');
+const { COMMAND_LANGUAGES } = require('./command-language');
 
 const execFileAsync = promisify(execFile);
 
 const OCOM_QUEUE = process.env.OCOM_PRINTER_NAME || 'OCOM_Ubuntu_Driver';
 const OCOM_ZPL_FORMAT = 'application/vnd.ocom-zpl';
-const PDF_FORMAT = 'application/pdf';
+const OCOM_EPL_FORMAT = 'application/vnd.ocom-epl';
+const OCOM_COMMAND_FORMATS = Object.freeze({
+  [COMMAND_LANGUAGES.ZPL]: OCOM_ZPL_FORMAT,
+  [COMMAND_LANGUAGES.EPL]: OCOM_EPL_FORMAT,
+});
 const DEFAULT_MEDIA_NAME = 'w288h113';
 const DEFAULT_MEDIA = Object.freeze({
   pageSize: DEFAULT_MEDIA_NAME,
@@ -183,7 +188,7 @@ function detectPrinterModel(name, deviceUri = '') {
   if (/\bargox\b/i.test(identity)) return PRINTER_MODELS.ARGOX;
   if (/\bzebra\b/i.test(identity)) return PRINTER_MODELS.ZEBRA;
 
-  // Unknown ZPL-compatible queues use raw ZPL. The user can identify the
+  // Unknown label-language queues use raw ZPL/EPL. The user can identify the
   // queue as ARGOX or ZEBRA in the dashboard without changing that behavior.
   return PRINTER_MODELS.ZEBRA;
 }
@@ -311,7 +316,7 @@ async function getPrinterStatus(name) {
       deviceUri: null,
       isOcom: isOcomPrinter(name),
       detectedModel: detectPrinterModel(name),
-      driver: isOcomPrinter(name) ? 'OCOM ZPL-to-TSPL' : 'Raw ZPL',
+      driver: isOcomPrinter(name) ? 'OCOM ZPL/EPL-to-PDF driver' : 'Raw ZPL/EPL',
       activeJobId: null,
     };
   }
@@ -356,7 +361,7 @@ async function getPrinterStatus(name) {
     deviceUri,
     isOcom: ocom,
     detectedModel,
-    driver: ocom ? 'OCOM ZPL-to-TSPL' : `${detectedModel} raw ZPL`,
+    driver: ocom ? 'OCOM ZPL/EPL-to-PDF driver' : `${detectedModel} raw ZPL/EPL`,
     activeJobId: printing ? printing[1] : null,
     connectionCheckError,
   };
@@ -377,41 +382,22 @@ async function findOcomPrinter() {
   return null;
 }
 
-function buildPrintArgs(printerName, useOcomDriver) {
+function buildPrintArgs(printerName, commandLanguage = null) {
   if (!printerName || typeof printerName !== 'string') {
     throw new TypeError('A printer name is required');
   }
 
   const args = ['-d', printerName, '-t', 'ZPLExpress label'];
-  if (useOcomDriver) {
-    args.push('-o', `document-format=${OCOM_ZPL_FORMAT}`);
+  if (commandLanguage) {
+    const documentFormat = OCOM_COMMAND_FORMATS[String(commandLanguage).toUpperCase()];
+    if (!documentFormat) {
+      throw new TypeError('OCOM command language must be ZPL or EPL');
+    }
+    args.push('-o', `document-format=${documentFormat}`);
   } else {
     args.push('-o', 'raw');
   }
   args.push('-');
-  return args;
-}
-
-function buildPdfPrintArgs(printerName, media = DEFAULT_MEDIA, copies = 1) {
-  if (!printerName || typeof printerName !== 'string') {
-    throw new TypeError('A printer name is required');
-  }
-
-  const args = [
-    '-d', printerName,
-    '-t', 'ZPLExpress PDF label',
-    '-n', String(Math.max(1, Math.min(999, Math.round(Number(copies) || 1)))),
-    '-o', `document-format=${PDF_FORMAT}`,
-    '-o', `PageSize=${media.pageSize || DEFAULT_MEDIA_NAME}`,
-    '-o', 'job-sheets=none,none',
-    '-o', 'sides=one-sided',
-    '-o', 'number-up=1',
-    '-o', 'orientation-requested=3',
-    '-o', 'position=top-left',
-    '-o', 'fit-to-page=false',
-    '-o', 'scaling=100',
-    '-',
-  ];
   return args;
 }
 
@@ -457,18 +443,18 @@ function submitBuffer(args, data) {
   });
 }
 
-// Submit through lp without a shell. OCOM data is tagged with the custom MIME
-// type so CUPS invokes zpl_to_tspl; true Zebra queues continue to receive raw
-// ZPL.
-function submitZpl(printerName, zpl, useOcomDriver) {
-  return submitBuffer(buildPrintArgs(printerName, useOcomDriver), zpl);
-}
-
-function submitPdf(printerName, pdf, media, copies = 1) {
-  if (!Buffer.isBuffer(pdf) || pdf.subarray(0, 5).toString('ascii') !== '%PDF-') {
-    return Promise.reject(new TypeError('submitPdf requires a PDF Buffer'));
+// Submit through lp without a shell. For OCOM, commandLanguage selects the
+// language-specific driver MIME type. A null language keeps ARGOX and ZEBRA
+// queues raw. Encoding the original request string once here preserves every
+// character and line break delivered by the JSON API.
+function submitCommands(printerName, commands, commandLanguage = null) {
+  if (typeof commands !== 'string' && !Buffer.isBuffer(commands)) {
+    return Promise.reject(new TypeError('Print commands must be a string or Buffer'));
   }
-  return submitBuffer(buildPdfPrintArgs(printerName, media, copies), pdf);
+  const payload = Buffer.isBuffer(commands)
+    ? commands
+    : Buffer.from(commands, 'utf8');
+  return submitBuffer(buildPrintArgs(printerName, commandLanguage), payload);
 }
 
 // List queued print jobs (not yet completed) via `lpstat -o`.
@@ -499,10 +485,9 @@ async function listJobs(activeJobId = null) {
 
 module.exports = {
   OCOM_QUEUE,
+  OCOM_EPL_FORMAT,
   OCOM_ZPL_FORMAT,
-  PDF_FORMAT,
   DEFAULT_MEDIA,
-  buildPdfPrintArgs,
   buildPrintArgs,
   detectPrinterModel,
   findOcomPrinter,
@@ -522,7 +507,6 @@ module.exports = {
   parsePageSize,
   parsePrinters,
   printerExists,
-  submitPdf,
-  submitZpl,
+  submitCommands,
   usbDeviceMatches,
 };

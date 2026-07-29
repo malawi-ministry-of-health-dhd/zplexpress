@@ -4,6 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
+  eplPrintQuantity,
   parseCsv,
   renderEplToPdf,
   tokenizeEpl,
@@ -59,6 +60,8 @@ test('renders the real MAHIS accession EPL to one exact-size PDF label', async (
   assert.equal(rendered.copies, 1);
   assert.equal(rendered.media.pageSize, 'w288h108');
   assert.match(pdfText, /\/MediaBox \[0 0 288 108\]/);
+  assert.match(pdfText, /ZPLExpress EPL label/);
+  assert.match(pdfText, /ZPLExpress local EPL-to-PDF renderer/);
   assert.ok(rendered.pdf.length > 5000);
   assert.deepEqual(rendered.warnings, []);
 });
@@ -80,6 +83,31 @@ test('renders MAHIS lines, multiple labels, and EPL P copies', async () => {
   assert.equal(rendered.pages, 2);
   assert.equal(rendered.copies, 2);
   assert.equal(pageMatches.length, 2);
+});
+
+test('multiplies EPL P sets and per-label copies', async () => {
+  const rendered = await renderEplToPdf(
+    'N\nA0,0,0,3,1,1,N,"SIX COPIES"\nP2,3\n',
+    LABEL_4_X_1_57,
+  );
+
+  assert.equal(eplPrintQuantity('P2,3'), 6);
+  assert.equal(rendered.pages, 1);
+  assert.equal(rendered.copies, 6);
+});
+
+test('rejects EPL print quantities that exceed the 999-label limit', async () => {
+  await assert.rejects(
+    () => renderEplToPdf(
+      'N\nA0,0,0,3,1,1,N,"TOO MANY"\nP500,2\n',
+      LABEL_4_X_1_57,
+    ),
+    /requests more than 999 labels/,
+  );
+  assert.throws(
+    () => eplPrintQuantity('P999999999999999999999,1'),
+    /requests more than 999 labels/,
+  );
 });
 
 test('locks the reported EPL sample to one top-left-anchored label page', async () => {
@@ -146,6 +174,23 @@ test('keeps content origins aligned with their own label after an empty format',
   assert.deepEqual(rendered.contentOrigins, [{ x: 0, y: 0 }, { x: 35, y: 30 }]);
   assert.match(rendered.pdf.toString('latin1'), /1 0 0 1 0 \d+(?:\.\d+)? Tm/);
 });
+
+for (const [description, epl] of [
+  ['a malformed text command', 'N\nA1,1\nP1\n'],
+  ['an unsupported barcode', 'N\nB0,0,0,ZZ,2,2,20,N,"ABC"\nP1\n'],
+  ['an all-white text field', 'N\nA0,0,0,3,1,1,N,"   "\nP1\n'],
+  [
+    'content wholly outside the configured label',
+    'N\nLO0,0,0,0\nA999,999,0,3,1,1,N,"OUTSIDE"\nP1\n',
+  ],
+]) {
+  test(`does not create a PDF page for ${description}`, async () => {
+    await assert.rejects(
+      () => renderEplToPdf(epl, LABEL_4_X_1_57),
+      /No EPL label format contained anything to print/,
+    );
+  });
+}
 
 test('rejects input without a complete EPL label frame', async () => {
   await assert.rejects(

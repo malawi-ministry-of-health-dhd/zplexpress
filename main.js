@@ -10,10 +10,8 @@ const cors = require('cors');
 const {
   PRINT_ROUTES,
   PRINTER_MODELS,
-  RENDER_MODES,
   loadConfig,
   normalizePrinterModel,
-  normalizeRenderMode,
   resolvePrintRoute,
   saveConfig,
 } = require('./config');
@@ -25,8 +23,7 @@ const {
   listJobs,
   listPrinters,
   printerExists,
-  submitPdf,
-  submitZpl,
+  submitCommands,
 } = require('./printers');
 const { runWizard } = require('./setup');
 const { renderZplToPdf } = require('./zpl-to-pdf');
@@ -61,11 +58,9 @@ function inspectCommandRequest(body) {
   };
 }
 
-function describePrintPath(printerModel, renderMode, commandLanguage = null) {
+function describePrintPath(printerModel, commandLanguage = null) {
   if (printerModel === PRINTER_MODELS.OCOM) {
-    return renderMode === RENDER_MODES.PDF_RASTER
-      ? `OCOM ${commandLanguage || 'ZPL/EPL'} → PDFRaster → CUPS raster → TSPL`
-      : 'OCOM NativeTSPL → ZPL-to-TSPL';
+    return `OCOM ${commandLanguage || 'ZPL/EPL'} → driver PDF → CUPS raster → TSPL`;
   }
   return `${printerModel} raw ${commandLanguage || 'ZPL/EPL'}`;
 }
@@ -117,7 +112,6 @@ async function startServer(config) {
   let printerModel = normalizePrinterModel(config.printerModel)
     || detectPrinterModel(config.printerName);
   let currentPort = config.port;
-  let renderMode = normalizeRenderMode(config.renderMode);
   let lastCommand = null;
   let httpServer;
 
@@ -127,7 +121,6 @@ async function startServer(config) {
       printerName,
       printerModel,
       port: currentPort,
-      renderMode,
     });
   };
 
@@ -180,12 +173,11 @@ async function startServer(config) {
       await ensurePrinterSelection();
       const printer = await getPrinterStatus(printerName);
       const jobs = await listJobs(printer.activeJobId);
-      const driver = describePrintPath(printerModel, renderMode);
+      const driver = describePrintPath(printerModel);
       res.status(200).json({
         service: 'running',
         port: currentPort,
         printerModel,
-        renderMode,
         lastCommand,
         printer: {
           name: printerName,
@@ -271,26 +263,7 @@ async function startServer(config) {
       return res.status(200).json({
         message: `Printer model set to ${printerModel}`,
         printerModel,
-        renderMode: printerModel === PRINTER_MODELS.OCOM ? renderMode : 'RawZPL',
-      });
-    } catch (error) {
-      return res.status(400).json({ error: error.message });
-    }
-  });
-
-  app.post('/render-mode', (req, res) => {
-    try {
-      if (printerModel !== PRINTER_MODELS.OCOM) {
-        return res.status(400).json({
-          error: 'OCOM renderer can only be selected when printerModel is OCOM',
-        });
-      }
-      renderMode = normalizeRenderMode(req.body.renderMode);
-      persistConfig();
-      console.log(`OCOM render mode changed to: ${renderMode}`);
-      return res.status(200).json({
-        message: `Render mode set to ${renderMode}`,
-        renderMode,
+        printRoute: resolvePrintRoute(printerModel),
       });
     } catch (error) {
       return res.status(400).json({ error: error.message });
@@ -325,8 +298,8 @@ async function startServer(config) {
     });
   });
 
-  // Render without printing. This makes it possible to inspect the exact PDF
-  // that will enter CUPS and is useful when tuning a label layout.
+  // Render a local diagnostic preview without printing. The /print route does
+  // not call this renderer; OCOM print conversion belongs to the CUPS driver.
   app.post('/render', async (req, res) => {
     try {
       const { commands, detection } = inspectCommandRequest(req.body);
@@ -373,7 +346,6 @@ async function startServer(config) {
   app.post('/print', async (req, res) => {
     let commands;
     let detection;
-    let requestedMode = null;
     try {
       ({ commands, detection } = inspectCommandRequest(req.body));
       lastCommand = {
@@ -382,25 +354,16 @@ async function startServer(config) {
         detectedAt: new Date().toISOString(),
       };
 
+    } catch (error) {
+      return res.status(400).json({ error: error.message });
+    }
+
+    try {
+      await ensurePrinterSelection();
       if (printerModel === PRINTER_MODELS.OCOM) {
-        requestedMode = normalizeRenderMode(req.body.renderMode ?? renderMode);
         console.log(
           `Detected ${detection.language} command language for the OCOM print request`,
         );
-        if (
-          detection.language === COMMAND_LANGUAGES.EPL
-          && requestedMode !== RENDER_MODES.PDF_RASTER
-        ) {
-          const message = 'EPL commands were detected, but OCOM NativeTSPL only translates ZPL. Select the PDFRaster renderer to convert EPL to PDF before printing.';
-          lastCommand.outcome = 'rejected: EPL requires OCOM PDFRaster';
-          return res.status(422).json({
-            error: message,
-            message,
-            commandLanguage: detection.language,
-            confidence: detection.confidence,
-            printed: false,
-          });
-        }
         if (![COMMAND_LANGUAGES.ZPL, COMMAND_LANGUAGES.EPL].includes(detection.language)) {
           const message = 'The command language could not be identified as ZPL or EPL. The OCOM job was not printed.';
           lastCommand.outcome = 'rejected: unknown command language';
@@ -414,12 +377,6 @@ async function startServer(config) {
         }
       }
 
-    } catch (error) {
-      return res.status(400).json({ error: error.message });
-    }
-
-    try {
-      await ensurePrinterSelection();
       const printer = await getPrinterStatus(printerName);
 
       if (!printer.queueAvailable) {
@@ -448,26 +405,15 @@ async function startServer(config) {
 
       let result;
       let driver;
-      let warnings = [];
-      let media = null;
-      const route = resolvePrintRoute(printerModel, requestedMode);
-      if (route === PRINT_ROUTES.OCOM_PDF_RASTER) {
-        const rendered = await renderLabel(commands, detection.language);
-        result = await submitPdf(
-          printerName,
-          rendered.pdf,
-          rendered.media,
-          rendered.copies,
-        );
-        driver = describePrintPath(printerModel, requestedMode, detection.language);
-        warnings = rendered.warnings;
-        media = rendered.media;
-      } else if (route === PRINT_ROUTES.OCOM_NATIVE_TSPL) {
-        result = await submitZpl(printerName, commands, true);
-        driver = describePrintPath(printerModel, requestedMode, detection.language);
+      const warnings = [];
+      const media = null;
+      const route = resolvePrintRoute(printerModel);
+      if (route === PRINT_ROUTES.OCOM_DRIVER) {
+        result = await submitCommands(printerName, commands, detection.language);
+        driver = describePrintPath(printerModel, detection.language);
       } else {
         // ARGOX and ZEBRA receive the detected ZPL or EPL bytes unchanged.
-        result = await submitZpl(printerName, commands, false);
+        result = await submitCommands(printerName, commands);
         driver = `${printerModel} raw ${detection.language}`;
       }
 
@@ -483,7 +429,7 @@ async function startServer(config) {
         printerModel,
         commandLanguage: detection.language,
         confidence: detection.confidence,
-        renderMode: printerModel === PRINTER_MODELS.OCOM ? requestedMode : 'RawZPL',
+        printRoute: route,
         media,
         warnings,
       });

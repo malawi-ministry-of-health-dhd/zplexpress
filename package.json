@@ -1,7 +1,7 @@
 {
   "name": "zpl",
-  "version": "1.4.3",
-  "description": "ZPL/EPL-aware printing service with local PDF rendering for OCOM and CUPS",
+  "version": "1.5.0",
+  "description": "ZPL/EPL-aware printing service for raw printers and the OCOM CUPS driver",
   "main": "main.js",
   "scripts": {
     "setup": "node main.js setup",

@@ -1,20 +1,19 @@
 # ZPL Printing Service
 
-A Node.js service that renders common ZPL and EPL label commands locally and prints
-them through CUPS. OCOM printers can use either:
+A Node.js service that detects ZPL and EPL label commands and prints them
+through CUPS. ARGOX and ZEBRA queues receive raw ZPL or EPL directly. For an
+OCOM printer, ZPLExpress sends the original command bytes with a
+language-specific CUPS MIME type; the installed OCOM driver converts ZPL or EPL
+to an exact-size PDF, rasterizes it, and produces printer-native TSPL.
 
-- `PDFRaster` (default): ZPL/EPL → exact-size PDF → CUPS raster → TSPL
-- `NativeTSPL`: ZPL only → TSPL using the OCOM driver's translator
-
-ARGOX and ZEBRA queues receive raw ZPL or EPL directly. Both PDF translators
-run locally, so patient and label data is not sent to an Internet rendering
-service.
+The optional `/render` endpoint still creates a local PDF preview. No patient
+or label data is sent to an Internet rendering service.
 
 ## Install
 
 ZPLExpress uses the
 [OCOM OCBP-T4201 driver](https://github.com/malawi-ministry-of-health-dhd/linux_printer_driver/releases)
-to translate ZPL into the printer's native TSPL. Install that driver first,
+to render ZPL/EPL and produce the printer's native TSPL. Install that driver first,
 then install `zplexpress_<version>_all.deb` from the
 [ZPLExpress Releases](https://github.com/malawi-ministry-of-health-dhd/zplexpress/releases)
 page. The OCOM driver is only required when the selected model is `OCOM`;
@@ -38,8 +37,8 @@ avoids the harmless `_apt` sandbox notice you get when installing from
 `~/Downloads`:
 
 ```bash
-DRIVER_VER=1.0.3
-ZPLEXPRESS_VER=1.4.3
+DRIVER_VER=1.1.0
+ZPLEXPRESS_VER=1.5.0
 
 curl -fsSLO "https://github.com/malawi-ministry-of-health-dhd/linux_printer_driver/releases/download/v${DRIVER_VER}/ocom-ocbp-t4201-driver_${DRIVER_VER}_amd64.deb"
 curl -fsSLO "https://github.com/malawi-ministry-of-health-dhd/zplexpress/releases/download/v${ZPLEXPRESS_VER}/zplexpress_${ZPLEXPRESS_VER}_all.deb"
@@ -63,10 +62,10 @@ Everything can be configured from the browser dashboard — no terminal needed:
 2. The installed `OCOM_Ubuntu_Driver` queue is selected automatically. If
    needed, pick a different printer from the dropdown.
 3. Select the printer model: **ARGOX**, **ZEBRA**, or **OCOM**.
-4. For OCOM only, select **PDFRaster** for local PDF rendering or
-   **NativeTSPL** for direct ZPL conversion. ARGOX and ZEBRA always receive
-   raw ZPL/EPL.
-5. Set the **port** if you want to change it (the page reloads on the new port).
+4. Set the **port** if you want to change it (the page reloads on the new port).
+
+For OCOM, ZPLExpress automatically detects ZPL or EPL and selects the matching
+OCOM driver input. There is no renderer setting to configure.
 
 The dashboard distinguishes an installed CUPS queue from the physical USB
 connection. It shows **USB connected** only while the selected USB printer is
@@ -75,8 +74,8 @@ plugged in and powered on.
 The **Test Print** card contains three built-in 203-dpi samples: a simple ZPL
 label, an EPL barcode label, and an EPL visit summary. Each uses a 1523 × 508
 dot logical canvas for 7.5 × 2.5-inch stock. Select a sample and press
-**Print**; it follows the active printer model and OCOM renderer exactly like
-an API print request. A 7.5-inch-wide layout requires a printer with a
+**Print**; it follows the active printer model exactly like an API print
+request. A 7.5-inch-wide layout requires a printer with a
 compatible print width. The OCOM OCBP-T4201 has a 4-inch-wide printhead, so
 that model requires the label to be rotated/redesigned with the 2.5-inch
 dimension across the printhead.
@@ -92,7 +91,7 @@ Your printer/port config in `/etc/zplexpress/config.json` is preserved.
 
 Every push to `main` runs the tests, builds a Debian package, and creates a
 `build-<run number>` prerelease with the `.deb` attached. Pushing a version tag
-such as `v1.4.2` creates the normal versioned GitHub Release.
+such as `v1.5.0` creates the normal versioned GitHub Release.
 
 ## Development / manual setup
 
@@ -136,22 +135,22 @@ The wizard lets you:
   listed; the OCOM queue is clearly marked and reports when its USB device is
   unplugged.
 - **Select the printer model** — `ARGOX`, `ZEBRA`, or `OCOM`. ARGOX and ZEBRA
-  use raw ZPL/EPL.
+  use raw ZPL/EPL; OCOM uses the installed conversion driver.
 - **Set the port** — the port the print server listens on.
-- **Select an OCOM renderer** — `PDFRaster` or `NativeTSPL`; this question is
-  only shown for OCOM.
 
-`config.json` holds four values:
+`config.json` holds three values:
 
 - `printerName`: The name of the selected ZPL-compatible printer
 - `printerModel`: `ARGOX`, `ZEBRA`, or `OCOM`
 - `port`: The port number for the service (default: 3000)
-- `renderMode`: `PDFRaster` (default) or `NativeTSPL`, used only for OCOM
+
+Upgrades tolerate and ignore a legacy `renderMode` field. It is removed the
+next time the configuration is saved.
 
 If no printer has been configured yet, the setup wizard runs automatically the
 first time you start the server. Environment variables (`PRINTER_NAME`,
-`PRINTER_MODEL`, `ZPL_RENDER_MODE`, and `PORT` in `.env`) are still honored as
-a fallback when `config.json` is absent.
+`PRINTER_MODEL`, and `PORT` in `.env`) are still honored as a fallback when
+`config.json` is absent.
 
 ## Running the Service
 
@@ -204,11 +203,11 @@ with `RUN_USER` / `RUN_GROUP` set.
 
 Once the service is running, you can send ZPL commands to your configured
 printer through the API endpoints. ARGOX and ZEBRA jobs are submitted with
-`lp -o raw`; ZPLExpress does not translate their ZPL.
+`lp -o raw`; ZPLExpress does not translate their ZPL or EPL.
 
 ### ZPL and EPL detection
 
-ZPLExpress inspects the command contents before selecting an OCOM print path.
+ZPLExpress inspects the command contents before selecting an OCOM driver input.
 It does not trust the request property name because MAHIS currently sends both
 ZPL and EPL strings in the legacy `zpl` JSON property.
 
@@ -216,9 +215,10 @@ ZPL and EPL strings in the legacy `zpl` JSON property.
 - EPL is recognized from its line-oriented `N`, `q`, `Q`, `A`, `B`, and `P`
   commands.
 - ARGOX and ZEBRA receive detected ZPL or EPL unchanged through the raw queue.
-- OCOM `PDFRaster` renders detected ZPL or EPL to an exact-size local PDF.
-- OCOM `NativeTSPL` accepts ZPL only. A detected EPL job in this mode is
-  rejected with HTTP `422` and an instruction to select `PDFRaster`.
+- OCOM receives detected ZPL unchanged as `application/vnd.ocom-zpl`.
+- OCOM receives detected EPL unchanged as `application/vnd.ocom-epl`.
+- The OCOM driver performs the PDF rendering, CUPS raster conversion, and TSPL
+  output using the queue's configured media size.
 
 The dashboard shows the language and outcome of the last command. You can also
 detect a payload without printing:
@@ -238,14 +238,13 @@ Example response:
 The language-neutral `commands` or `data` request properties are also
 accepted, while `zpl` and `epl` remain supported for compatibility.
 
-For OCOM in the default `PDFRaster` mode, ZPLExpress detects ZPL or EPL, reads
-the selected CUPS `PageSize`, creates a PDF with that exact physical media box,
-sets every PDF boundary box to that size, clips drawing to the label, removes
-the unused outer source-coordinate margin so the first content starts at the
-PDF top-left, and submits it as `application/pdf`. CUPS rasterizes the PDF and
-the OCOM driver produces TSPL. ZPL `^PW`/`^LL` and EPL `q`/`Q` remain logical
-coordinates and cannot change the physical label feed length. PDF submissions
-also explicitly disable banner sheets, duplexing, and multi-up layout.
+For OCOM printing, ZPLExpress does not render or rewrite the command payload.
+It sends the exact received UTF-8 bytes to CUPS with the detected language MIME
+type. The OCOM driver reads the selected queue `PageSize`, creates a PDF with
+that exact physical media box, anchors content at the top-left, clips drawing
+to one label, rasterizes it, and produces TSPL. ZPL `^PW`/`^LL` and EPL `q`/`Q`
+remain logical drawing coordinates and cannot change the physical label feed
+length.
 
 ```bash
 curl -X POST http://localhost:3000/print \
@@ -253,7 +252,7 @@ curl -X POST http://localhost:3000/print \
   --data '{"zpl":"^XA^PW812^LL319^FO80,25^BY3^BCN,110,Y,N,N^FDJOHNDOE^FS^FO285,210^A0N,34,34^FDJOHN DOE^FS^XZ"}'
 ```
 
-Preview the same local rendering without printing:
+Preview the same label locally without printing:
 
 ```bash
 curl -X POST http://localhost:3000/render \
@@ -263,11 +262,10 @@ curl -X POST http://localhost:3000/render \
 ```
 
 EPL sent by MAHIS is accepted even when it is carried in the legacy `zpl`
-property. It is detected from the command contents and rendered with its
-relative reference layout, fixed EPL font metrics, lines, boxes, rotations,
-barcodes, and copies. Any unused positive reference/field offset surrounding
-the whole label is normalized away so the content is anchored at the PDF
-top-left:
+property. The preview endpoint renders its relative reference layout, fixed EPL
+font metrics, lines, boxes, rotations, barcodes, and copies. Any unused positive
+reference/field offset surrounding the whole label is normalized away so the
+content is anchored at the PDF top-left:
 
 ```bash
 curl -X POST http://localhost:3000/render \
@@ -281,20 +279,13 @@ Send the same EPL label to the selected OCOM printer:
 ```bash
 curl -X POST http://localhost:3000/print \
   -H 'Content-Type: application/json' \
-  --data '{"renderMode":"PDFRaster","epl":"N\nq600\nQ230,20\nR130,0\nZT\nA100,6,0,3,1,1,N,\"John Doe\"\nB100,30,0,1,3,8,80,N,\"P1001\"\nP1"}'
-```
-
-Override the configured mode for one OCOM print:
-
-```bash
-curl -X POST http://localhost:3000/print \
-  -H 'Content-Type: application/json' \
-  --data '{"renderMode":"NativeTSPL","zpl":"^XA^FO10,5^A0N,30,30^FDTEST^FS^XZ"}'
+  --data '{"epl":"N\nq600\nQ230,20\nR130,0\nZT\nA100,6,0,3,1,1,N,\"John Doe\"\nB100,30,0,1,3,8,80,N,\"P1001\"\nP1"}'
 ```
 
 ### Configure the physical label size
 
-Set the size on the CUPS queue. The service reads it for every PDF render:
+Set the size on the CUPS queue. The OCOM driver uses it for every printed label,
+and ZPLExpress uses it for `/render` previews:
 
 ```bash
 # Default: 4 x 1.57 in (101.6 x 39.9 mm)
@@ -311,17 +302,16 @@ as `Custom.101.6x39.9mm`. Do not rely on `^LL` to configure the stock; `^LL`
 only describes the ZPL drawing canvas, and EPL `Q` only describes its logical
 canvas.
 
-The local ZPL renderer handles the common commands used by ZPLExpress labels:
+The local preview renderer handles these common ZPL commands:
 `^FO`, `^FT`, `^A`, `^CF`, `^FB`, `^FD`, `^FH`, `^GB`, `^GC`,
 uncompressed `^GFA`, `^BY`, `^BC`, `^B3`, `^BQ`, and `^PQ`. Unsupported
 specialized commands are ignored rather than being forwarded online.
 
-The local EPL renderer supports the MAHIS command set: `N`, `q`, `Q`, `R`,
+The local EPL preview renderer supports the MAHIS command set: `N`, `q`, `Q`, `R`,
 `ZT`, `ZB`, `A`, `B`, `LO`, `X`, and `P`, plus the common speed, density, and
 character-set setup commands. Supported EPL barcodes include Code 128, Code
-39, Interleaved 2 of 5, EAN-13, EAN-8, UPC-A, and Codabar. Use `NativeTSPL`
-only when a ZPL label depends on a command implemented by the OCOM translator
-but not by the ZPL PDF renderer.
+39, Interleaved 2 of 5, EAN-13, EAN-8, UPC-A, and Codabar. These lists describe
+only `/render`; printed OCOM jobs are interpreted by the installed driver.
 
 If the configured OCOM USB printer is unplugged, this endpoint returns HTTP
 `503` with an explanation instead of queueing a job that cannot print.
@@ -329,7 +319,7 @@ If the configured OCOM USB printer is unplugged, this endpoint returns HTTP
 ## Requirements
 
 - Node.js 18+
-- `ocom-ocbp-t4201-driver` 1.0.3 or newer for an OCOM OCBP-T4201
+- `ocom-ocbp-t4201-driver` 1.1.0 or newer for an OCOM OCBP-T4201
 - A compatible raw CUPS queue for ARGOX or ZEBRA
 - CUPS and a USB connection to the printer
 

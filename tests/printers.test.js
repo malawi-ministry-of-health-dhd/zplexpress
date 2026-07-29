@@ -6,9 +6,8 @@ const path = require('node:path');
 
 const {
   DEFAULT_MEDIA,
-  PDF_FORMAT,
+  OCOM_EPL_FORMAT,
   OCOM_ZPL_FORMAT,
-  buildPdfPrintArgs,
   buildPrintArgs,
   detectPrinterModel,
   getPrinterMedia,
@@ -20,8 +19,7 @@ const {
   parseMarkedLpOption,
   parsePageSize,
   parsePrinters,
-  submitPdf,
-  submitZpl,
+  submitCommands,
   usbDeviceMatches,
 } = require('../printers');
 
@@ -100,8 +98,8 @@ test('detects OCOM, ARGOX, and ZEBRA printer models', () => {
   assert.equal(detectPrinterModel('Generic_ZPL_Printer'), 'ZEBRA');
 });
 
-test('routes OCOM through its MIME filter and ARGOX/ZEBRA as raw ZPL', () => {
-  assert.deepEqual(buildPrintArgs('OCOM_Ubuntu_Driver', true), [
+test('routes OCOM through language MIME filters and ARGOX/ZEBRA as raw commands', () => {
+  assert.deepEqual(buildPrintArgs('OCOM_Ubuntu_Driver', 'ZPL'), [
     '-d',
     'OCOM_Ubuntu_Driver',
     '-t',
@@ -111,7 +109,17 @@ test('routes OCOM through its MIME filter and ARGOX/ZEBRA as raw ZPL', () => {
     '-',
   ]);
 
-  assert.deepEqual(buildPrintArgs('Zebra_GK420d', false), [
+  assert.deepEqual(buildPrintArgs('OCOM_Ubuntu_Driver', 'EPL'), [
+    '-d',
+    'OCOM_Ubuntu_Driver',
+    '-t',
+    'ZPLExpress label',
+    '-o',
+    `document-format=${OCOM_EPL_FORMAT}`,
+    '-',
+  ]);
+
+  assert.deepEqual(buildPrintArgs('Zebra_GK420d'), [
     '-d',
     'Zebra_GK420d',
     '-t',
@@ -121,7 +129,7 @@ test('routes OCOM through its MIME filter and ARGOX/ZEBRA as raw ZPL', () => {
     '-',
   ]);
 
-  assert.deepEqual(buildPrintArgs('Argox_OS-2140', false), [
+  assert.deepEqual(buildPrintArgs('Argox_OS-2140'), [
     '-d',
     'Argox_OS-2140',
     '-t',
@@ -130,6 +138,11 @@ test('routes OCOM through its MIME filter and ARGOX/ZEBRA as raw ZPL', () => {
     'raw',
     '-',
   ]);
+
+  assert.throws(
+    () => buildPrintArgs('OCOM_Ubuntu_Driver', 'UNKNOWN'),
+    /must be ZPL or EPL/,
+  );
 });
 
 test('parses the configured CUPS page size for PDF rendering', () => {
@@ -200,34 +213,15 @@ test('falls back to detailed CUPS options when compact output omits PageSize', a
   }
 });
 
-test('builds a size-locked CUPS PDF job', () => {
-  const media = parsePageSize('w288h108');
-  assert.deepEqual(buildPdfPrintArgs('OCOM_Ubuntu_Driver', media, 2), [
-    '-d', 'OCOM_Ubuntu_Driver',
-    '-t', 'ZPLExpress PDF label',
-    '-n', '2',
-    '-o', `document-format=${PDF_FORMAT}`,
-    '-o', 'PageSize=w288h108',
-    '-o', 'job-sheets=none,none',
-    '-o', 'sides=one-sided',
-    '-o', 'number-up=1',
-    '-o', 'orientation-requested=3',
-    '-o', 'position=top-left',
-    '-o', 'fit-to-page=false',
-    '-o', 'scaling=100',
-    '-',
-  ]);
-});
-
 test('keeps a printer name as one lp argument instead of executing a shell', () => {
   const unsafeLookingName = 'printer; touch /tmp/should-not-exist';
-  const args = buildPrintArgs(unsafeLookingName, true);
+  const args = buildPrintArgs(unsafeLookingName, 'ZPL');
 
   assert.equal(args[1], unsafeLookingName);
   assert.equal(args.length, 7);
 });
 
-test('detects a plugged OCOM device and submits it through the translator', async () => {
+test('detects a plugged OCOM device and submits unchanged ZPL through the driver', async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zplexpress-test-'));
   const oldPath = process.env.PATH;
   const argsFile = path.join(tempDir, 'lp-args');
@@ -266,50 +260,23 @@ test('detects a plugged OCOM device and submits it through the translator', asyn
     assert.equal(status.available, true);
     assert.equal(status.isOcom, true);
 
-    const result = await submitZpl(
+    const commands = '\n^XA^FO20,20^FDJOHN DOE^FS^XZ\r\n';
+    const result = await submitCommands(
       'OCOM_Ubuntu_Driver',
-      '^XA^FO20,20^FDJOHN DOE^FS^XZ',
-      status.isOcom,
+      commands,
+      'ZPL',
     );
     assert.equal(result.jobId, 'OCOM_Ubuntu_Driver-42');
     assert.ok(
       fs.readFileSync(argsFile, 'utf8').includes(`document-format=${OCOM_ZPL_FORMAT}`),
     );
-    assert.equal(fs.readFileSync(inputFile, 'utf8'), '^XA^FO20,20^FDJOHN DOE^FS^XZ');
-  } finally {
-    process.env.PATH = oldPath;
-    delete process.env.ZPL_TEST_ARGS;
-    delete process.env.ZPL_TEST_INPUT;
-    fs.rmSync(tempDir, { recursive: true, force: true });
-  }
-});
+    assert.equal(fs.readFileSync(inputFile, 'utf8'), commands);
 
-test('submits generated PDF bytes through CUPS without a shell', async () => {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zplexpress-pdf-test-'));
-  const oldPath = process.env.PATH;
-  const argsFile = path.join(tempDir, 'lp-args');
-  const inputFile = path.join(tempDir, 'lp-input');
-  const lp = path.join(tempDir, 'lp');
-  fs.writeFileSync(lp, [
-    '#!/bin/sh',
-    'printf "%s\\n" "$@" > "$ZPL_TEST_ARGS"',
-    'cat > "$ZPL_TEST_INPUT"',
-    'printf "%s\\n" "request id is OCOM_Ubuntu_Driver-43 (1 file(s))"',
-  ].join('\n'), { mode: 0o755 });
-
-  process.env.PATH = `${tempDir}:${oldPath}`;
-  process.env.ZPL_TEST_ARGS = argsFile;
-  process.env.ZPL_TEST_INPUT = inputFile;
-
-  try {
-    const pdf = Buffer.from('%PDF-1.3\nlocal-render\n%%EOF\n');
-    const media = parsePageSize('w288h108');
-    const result = await submitPdf('OCOM_Ubuntu_Driver', pdf, media, 1);
-
-    assert.equal(result.jobId, 'OCOM_Ubuntu_Driver-43');
-    assert.ok(fs.readFileSync(argsFile, 'utf8').includes(`document-format=${PDF_FORMAT}`));
-    assert.ok(fs.readFileSync(argsFile, 'utf8').includes('PageSize=w288h108'));
-    assert.deepEqual(fs.readFileSync(inputFile), pdf);
+    const rawEpl = '\nN\nA10,10,0,3,1,1,N,"RAW EPL"\nP1\n';
+    await submitCommands('Argox_OS-2140', rawEpl);
+    assert.match(fs.readFileSync(argsFile, 'utf8'), /(?:^|\n)raw(?:\n|$)/);
+    assert.doesNotMatch(fs.readFileSync(argsFile, 'utf8'), /document-format=/);
+    assert.equal(fs.readFileSync(inputFile, 'utf8'), rawEpl);
   } finally {
     process.env.PATH = oldPath;
     delete process.env.ZPL_TEST_ARGS;

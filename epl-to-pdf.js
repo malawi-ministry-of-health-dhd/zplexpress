@@ -9,6 +9,7 @@ const {
   dotsToMm,
   dotsToPoints,
   finishClippedLabelPage,
+  intersectsLabel,
   normalizeMedia,
   rotateFieldOrigin,
 } = require('./zpl-to-pdf');
@@ -161,10 +162,28 @@ function rotationDegrees(value) {
   }[integer(value)] ?? 0;
 }
 
-function drawText(doc, state, fields, warnings) {
+function eplPrintQuantity(command, maximum = 999) {
+  const match = String(command).trim().match(/^P(\d+)(?:,(\d+))?$/i);
+  if (!match) return null;
+
+  const sets = BigInt(match[1]);
+  const copiesPerLabel = match[2] === undefined ? 1n : BigInt(match[2]);
+  const limit = BigInt(maximum);
+  if (sets < 1n || copiesPerLabel < 1n) {
+    throw new RangeError('EPL print quantities must be greater than zero');
+  }
+  if (sets > limit || copiesPerLabel > limit || sets * copiesPerLabel > limit) {
+    throw new RangeError(
+      `The EPL command stream requests more than ${maximum} labels`,
+    );
+  }
+  return Number(sets * copiesPerLabel);
+}
+
+function drawText(doc, state, fields, warnings, ensurePage) {
   if (fields.length < 8) {
     warnings.push('Ignored malformed EPL A text command');
-    return;
+    return false;
   }
 
   const [xValue, yValue, rotation, font, horizontal, vertical, reverse, ...textParts] =
@@ -177,20 +196,29 @@ function drawText(doc, state, fields, warnings) {
   const degrees = rotationDegrees(rotation);
   const textWidth = dotsToPoints(metrics.widthDots * value.length, state.media.dpi);
   const textHeight = dotsToPoints(metrics.heightDots, state.media.dpi);
+  const reversed = String(reverse).toUpperCase() === 'R';
+  const rotated = degrees === 90 || degrees === 270;
+  const widthDots = metrics.widthDots * value.length;
+  const heightDots = metrics.heightDots;
 
-  if (
-    origin.x >= state.media.widthDots
-    || origin.y >= state.media.heightDots
-    || origin.x + metrics.widthDots <= 0
-    || origin.y + metrics.heightDots <= 0
-  ) {
+  if (!intersectsLabel(
+    origin,
+    rotated ? heightDots : widthDots,
+    rotated ? widthDots : heightDots,
+    state.media,
+  )) {
     warnings.push(`Skipped EPL text outside the configured label at ${origin.x},${origin.y}`);
-    return;
+    return false;
+  }
+  if (!reversed && !value.trim().length) {
+    warnings.push('Skipped an EPL text field containing no printable characters');
+    return false;
   }
 
+  ensurePage();
   doc.save();
   rotateFieldOrigin(doc, degrees, x, y, textWidth, textHeight);
-  if (String(reverse).toUpperCase() === 'R') {
+  if (reversed) {
     doc.fillColor('black').rect(x, y, textWidth, textHeight).fill();
     doc.fillColor('white');
   } else {
@@ -204,6 +232,7 @@ function drawText(doc, state, fields, warnings) {
       horizontalScaling: metrics.horizontalScaling,
     });
   doc.restore();
+  return true;
 }
 
 function barcodeType(value) {
@@ -218,10 +247,10 @@ function barcodeType(value) {
   return null;
 }
 
-async function drawBarcode(doc, state, fields, warnings) {
+async function drawBarcode(doc, state, fields, warnings, ensurePage) {
   if (fields.length < 9) {
     warnings.push('Ignored malformed EPL B barcode command');
-    return;
+    return false;
   }
 
   const [
@@ -239,7 +268,7 @@ async function drawBarcode(doc, state, fields, warnings) {
   const bcid = barcodeType(symbology);
   if (!bcid) {
     warnings.push(`EPL barcode type ${symbology || '(empty)'} is not supported`);
-    return;
+    return false;
   }
 
   const origin = absoluteOrigin(state, xValue, yValue);
@@ -247,7 +276,7 @@ async function drawBarcode(doc, state, fields, warnings) {
   const availableHeightDots = state.media.heightDots - origin.y;
   if (availableWidthDots <= 0 || availableHeightDots <= 0) {
     warnings.push(`Skipped EPL barcode outside the configured label at ${origin.x},${origin.y}`);
-    return;
+    return false;
   }
 
   const heightDots = clamp(integer(heightValue, 80), 8, availableHeightDots);
@@ -263,6 +292,7 @@ async function drawBarcode(doc, state, fields, warnings) {
       padding: 0,
       backgroundcolor: 'FFFFFF',
     });
+    ensurePage();
     const x = dotsToPoints(origin.x, state.media.dpi);
     const y = dotsToPoints(origin.y, state.media.dpi);
     const width = dotsToPoints(availableWidthDots, state.media.dpi);
@@ -288,17 +318,19 @@ async function drawBarcode(doc, state, fields, warnings) {
         '1',
         'N',
         value,
-      ], warnings);
+      ], warnings, ensurePage);
     }
+    return true;
   } catch (error) {
     warnings.push(`Could not render EPL ${symbology} barcode: ${error.message}`);
+    return false;
   }
 }
 
-function drawLine(doc, state, fields, warnings) {
+function drawLine(doc, state, fields, warnings, ensurePage) {
   if (fields.length < 4) {
     warnings.push('Ignored malformed EPL LO line command');
-    return;
+    return false;
   }
   const [xValue, yValue, widthValue, heightValue] = fields;
   const origin = absoluteOrigin(state, xValue, yValue);
@@ -306,9 +338,14 @@ function drawLine(doc, state, fields, warnings) {
   const height = integer(heightValue);
   if (width <= 0 || height <= 0) {
     warnings.push('Ignored EPL LO command with a non-positive size');
-    return;
+    return false;
+  }
+  if (!intersectsLabel(origin, width, height, state.media)) {
+    warnings.push(`Skipped an EPL line outside the configured label at ${origin.x},${origin.y}`);
+    return false;
   }
 
+  ensurePage();
   doc
     .save()
     .fillColor('black')
@@ -320,12 +357,13 @@ function drawLine(doc, state, fields, warnings) {
     )
     .fill()
     .restore();
+  return true;
 }
 
-function drawBox(doc, state, fields, warnings) {
+function drawBox(doc, state, fields, warnings, ensurePage) {
   if (fields.length < 5) {
     warnings.push('Ignored malformed EPL X box command');
-    return;
+    return false;
   }
   const [xValue, yValue, thicknessValue, rightValue, bottomValue] = fields;
   const origin = absoluteOrigin(state, xValue, yValue);
@@ -335,9 +373,14 @@ function drawBox(doc, state, fields, warnings) {
   const height = bottom - origin.y;
   if (width <= 0 || height <= 0) {
     warnings.push('Ignored EPL X command with invalid box coordinates');
-    return;
+    return false;
+  }
+  if (!intersectsLabel(origin, width, height, state.media)) {
+    warnings.push(`Skipped an EPL box outside the configured label at ${origin.x},${origin.y}`);
+    return false;
   }
 
+  ensurePage();
   doc
     .save()
     .strokeColor('black')
@@ -350,6 +393,7 @@ function drawBox(doc, state, fields, warnings) {
     )
     .stroke()
     .restore();
+  return true;
 }
 
 async function renderEplToPdf(epl, media = DEFAULT_MEDIA) {
@@ -399,10 +443,11 @@ async function renderEplToPdf(epl, media = DEFAULT_MEDIA) {
   // formats are common in label streams, and giving one a page makes the
   // printer feed a blank label.
   const openPage = () => {
-    if (pageOpen) return;
+    if (pageOpen) return true;
     addClippedLabelPage(doc, pageWidth, pageHeight);
     pageOpen = true;
     pages += 1;
+    return true;
   };
 
   for (const line of lines) {
@@ -418,9 +463,9 @@ async function renderEplToPdf(epl, media = DEFAULT_MEDIA) {
     }
     if (!state) continue;
 
-    const printMatch = line.match(/^P(\d+)(?:,\d+)?$/i);
-    if (printMatch) {
-      state.copies = clamp(integer(printMatch[1], 1), 1, 999);
+    const printQuantity = eplPrintQuantity(line);
+    if (printQuantity !== null) {
+      state.copies = printQuantity;
       if (pageOpen) {
         copies = Math.max(copies, state.copies);
         finishClippedLabelPage(doc);
@@ -447,17 +492,13 @@ async function renderEplToPdf(epl, media = DEFAULT_MEDIA) {
         warnings.push('EPL ZB bottom-up feed direction is approximated on fixed PDF media');
       }
     } else if (/^A/i.test(line)) {
-      openPage();
-      drawText(doc, state, parseCsv(line.slice(1)), warnings);
+      drawText(doc, state, parseCsv(line.slice(1)), warnings, openPage);
     } else if (/^B/i.test(line)) {
-      openPage();
-      await drawBarcode(doc, state, parseCsv(line.slice(1)), warnings);
+      await drawBarcode(doc, state, parseCsv(line.slice(1)), warnings, openPage);
     } else if (/^LO/i.test(line)) {
-      openPage();
-      drawLine(doc, state, parseCsv(line.slice(2)), warnings);
+      drawLine(doc, state, parseCsv(line.slice(2)), warnings, openPage);
     } else if (/^X/i.test(line)) {
-      openPage();
-      drawBox(doc, state, parseCsv(line.slice(1)), warnings);
+      drawBox(doc, state, parseCsv(line.slice(1)), warnings, openPage);
     } else if (
       /^(?:S\d+|D\d+|OD|O|JF|I8,[A-Z],\d+)$/i.test(line)
     ) {
@@ -494,6 +535,7 @@ async function renderEplToPdf(epl, media = DEFAULT_MEDIA) {
 module.exports = {
   EPL_FONT_METRICS,
   MAX_EPL_BYTES,
+  eplPrintQuantity,
   findEplContentOrigins,
   parseCsv,
   renderEplToPdf,

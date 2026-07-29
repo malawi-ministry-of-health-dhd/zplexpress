@@ -55,6 +55,8 @@ test('renders the long ^FB medical label to one exact-size PDF page', async () =
   assert.equal(rendered.pages, 1);
   assert.equal(rendered.media.pageSize, 'w288h108');
   assert.match(pdfText, /\/MediaBox \[0 0 288 108\]/);
+  assert.match(pdfText, /ZPLExpress label/);
+  assert.match(pdfText, /ZPLExpress local ZPL-to-PDF renderer/);
 });
 
 test('renders Code 128 and honors ^PQ copies', async () => {
@@ -133,6 +135,24 @@ test('does not let an empty format inflate the copy count', async () => {
   assert.equal(rendered.pages, 1);
   assert.equal(rendered.copies, 1);
 });
+
+for (const [description, zpl] of [
+  ['malformed graphics', '^XA^FO0,0^GFA^XZ'],
+  ['unsupported graphic compression', '^XA^FO0,0^GFB,1,1,1,FF^XZ'],
+  [
+    'content wholly outside the configured label',
+    '^XA^FO0,0^GB0,0,1,B^FS^FO999,999^FDOUTSIDE^FS^XZ',
+  ],
+  ['an all-white box on an empty label', '^XA^FO0,0^GB20,20,2,W^FS^XZ'],
+  ['an all-white bitmap', '^XA^FO0,0^GFA,2,2,1,0000^XZ'],
+]) {
+  test(`does not create a PDF page for ${description}`, async () => {
+    await assert.rejects(
+      () => renderZplToPdf(zpl, LABEL_4_X_1_57),
+      /No ZPL label format contained anything to print/,
+    );
+  });
+}
 
 test('rejects a ZPL stream whose label formats all print nothing', async () => {
   await assert.rejects(

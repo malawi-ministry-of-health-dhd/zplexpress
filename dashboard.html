@@ -82,7 +82,7 @@
           <select id="printer-model-select">
             <option value="ARGOX">ARGOX — raw ZPL/EPL</option>
             <option value="ZEBRA">ZEBRA — raw ZPL/EPL</option>
-            <option value="OCOM">OCOM — renderer</option>
+            <option value="OCOM">OCOM — ZPL/EPL driver</option>
           </select>
         </span>
       </div>
@@ -90,19 +90,9 @@
       <div class="row"><span class="k">Connection</span><span class="v" id="printer-connection">—</span></div>
       <div class="row"><span class="k">Print path</span><span class="v" id="printer-driver">—</span></div>
       <div class="row"><span class="k">Last command</span><span class="v" id="last-command-language">—</span></div>
-      <div class="row" id="render-mode-row" hidden>
-        <span class="k">OCOM renderer</span>
-        <span class="v">
-          <select id="render-mode-select">
-            <option value="PDFRaster">PDFRaster — local PDF</option>
-            <option value="NativeTSPL">NativeTSPL — direct conversion</option>
-          </select>
-        </span>
-      </div>
       <div class="row"><span class="k">Device</span><span class="v" id="printer-device">—</span></div>
       <div id="printer-msg" class="msg" hidden></div>
       <div id="printer-model-msg" class="msg" hidden></div>
-      <div id="render-mode-msg" class="msg" hidden></div>
     </div>
 
     <div class="card">
@@ -159,9 +149,6 @@
     const msg = document.getElementById('printer-msg');
     const printerModelSelect = document.getElementById('printer-model-select');
     const printerModelMsg = document.getElementById('printer-model-msg');
-    const renderModeRow = document.getElementById('render-mode-row');
-    const renderModeSelect = document.getElementById('render-mode-select');
-    const renderModeMsg = document.getElementById('render-mode-msg');
     const testPrintSelect = document.getElementById('test-print-select');
     const testPrintButton = document.getElementById('test-print-button');
     const testPrintMsg = document.getElementById('test-print-msg');
@@ -203,14 +190,12 @@
       ].join('\n'),
     });
 
-    function updateRendererVisibility(printerModel) {
-      renderModeRow.hidden = printerModel !== 'OCOM';
-      if (printerModel !== 'OCOM') renderModeMsg.hidden = true;
+    function updatePrinterHint(printerModel) {
       testPrintHint.textContent = printerModel === 'OCOM'
         ? 'Samples use a 7.5 × 2.5 in logical canvas. The OCOM OCBP-T4201 has a 4-inch-wide printhead, so a 7.5-inch-wide layout cannot print at physical size without rotating/redesigning it.'
         : 'Samples use a 7.5 × 2.5 in logical canvas (1523 × 508 dots at 203 dpi). The selected printer and its loaded media must support that physical size.';
     }
-    updateRendererVisibility(printerModelSelect.value);
+    updatePrinterHint(printerModelSelect.value);
 
     function showMsg(text, ok) {
       msg.textContent = text;
@@ -233,7 +218,7 @@
         if (data.configured) select.value = data.configured;
         if (data.configuredModel) {
           printerModelSelect.value = data.configuredModel;
-          updateRendererVisibility(data.configuredModel);
+          updatePrinterHint(data.configuredModel);
         }
       } catch (err) {
         select.innerHTML = '<option>Could not load printers</option>';
@@ -253,7 +238,7 @@
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'Failed to switch printer');
         printerModelSelect.value = data.printerModel;
-        updateRendererVisibility(data.printerModel);
+        updatePrinterHint(data.printerModel);
         showMsg('Active printer set to ' + name + ' as ' + data.printerModel, true);
         refresh();
       } catch (err) {
@@ -275,9 +260,9 @@
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'Failed to change printer model');
-        updateRendererVisibility(data.printerModel);
+        updatePrinterHint(data.printerModel);
         printerModelMsg.textContent = data.printerModel === 'OCOM'
-          ? 'OCOM selected — choose the renderer below.'
+          ? 'OCOM selected — ZPL/EPL will be sent unchanged to the OCOM driver.'
           : data.printerModel + ' selected — ZPL/EPL will be sent directly.';
         printerModelMsg.className = 'msg ok';
         printerModelMsg.hidden = false;
@@ -288,29 +273,6 @@
         printerModelMsg.hidden = false;
       } finally {
         printerModelSelect.disabled = false;
-      }
-    });
-
-    renderModeSelect.addEventListener('change', async () => {
-      renderModeSelect.disabled = true;
-      renderModeMsg.hidden = true;
-      try {
-        const res = await fetch('/render-mode', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ renderMode: renderModeSelect.value }),
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || 'Failed to change renderer');
-        renderModeMsg.textContent = 'OCOM renderer set to ' + data.renderMode;
-        renderModeMsg.className = 'msg ok';
-        renderModeMsg.hidden = false;
-      } catch (err) {
-        renderModeMsg.textContent = 'Error: ' + err.message;
-        renderModeMsg.className = 'msg err';
-        renderModeMsg.hidden = false;
-      } finally {
-        renderModeSelect.disabled = false;
       }
     });
 
@@ -425,10 +387,7 @@
           && !printerModelSelect.disabled
         ) {
           printerModelSelect.value = data.printerModel;
-          updateRendererVisibility(data.printerModel);
-        }
-        if (data.renderMode && document.activeElement !== renderModeSelect && !renderModeSelect.disabled) {
-          renderModeSelect.value = data.renderMode;
+          updatePrinterHint(data.printerModel);
         }
 
         // Seed the port field once (don't overwrite while the user edits it).

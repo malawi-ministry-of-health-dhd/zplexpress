@@ -10,16 +10,13 @@ const dashboard = fs.readFileSync(
   'utf8',
 );
 
-test('OCOM renderer is initially hidden and only shown for the OCOM model', () => {
+test('dashboard describes the OCOM driver without obsolete renderer controls', () => {
+  assert.match(dashboard, /OCOM — ZPL\/EPL driver/);
   assert.match(
     dashboard,
-    /<div class="row" id="render-mode-row" hidden>/,
+    /OCOM selected — ZPL\/EPL will be sent unchanged to the OCOM driver\./,
   );
-  assert.match(dashboard, /\.row\[hidden\]\s*\{\s*display:\s*none;\s*\}/);
-  assert.match(
-    dashboard,
-    /renderModeRow\.hidden = printerModel !== 'OCOM';/,
-  );
+  assert.doesNotMatch(dashboard, /id="render-mode-row"|\/render-mode|PDFRaster|NativeTSPL/);
 });
 
 test('dashboard exposes the most recently detected command language', () => {

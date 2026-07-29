@@ -7,7 +7,6 @@ const {
 } = require('./printers');
 const {
   PRINTER_MODELS,
-  RENDER_MODES,
   loadConfig,
   saveConfig,
 } = require('./config');
@@ -57,32 +56,14 @@ async function runWizard() {
   const printerModel = await select({
     message: 'Select the printer model:',
     choices: [
-      { name: 'ARGOX — send ZPL directly', value: PRINTER_MODELS.ARGOX },
-      { name: 'ZEBRA — send ZPL directly', value: PRINTER_MODELS.ZEBRA },
-      { name: 'OCOM — use an OCOM renderer', value: PRINTER_MODELS.OCOM },
+      { name: 'ARGOX — send ZPL/EPL directly', value: PRINTER_MODELS.ARGOX },
+      { name: 'ZEBRA — send ZPL/EPL directly', value: PRINTER_MODELS.ZEBRA },
+      { name: 'OCOM — use the OCOM ZPL/EPL driver', value: PRINTER_MODELS.OCOM },
     ],
     default: current.printerName === printerName && current.printerModel
       ? current.printerModel
       : detectedModel,
   });
-
-  let renderMode = current.renderMode;
-  if (printerModel === PRINTER_MODELS.OCOM) {
-    renderMode = await select({
-      message: 'OCOM ZPL rendering mode:',
-      choices: [
-        {
-          name: 'PDFRaster — local ZPL-to-PDF rendering (recommended)',
-          value: RENDER_MODES.PDF_RASTER,
-        },
-        {
-          name: 'NativeTSPL — direct ZPL-to-TSPL conversion',
-          value: RENDER_MODES.NATIVE_TSPL,
-        },
-      ],
-      default: current.renderMode,
-    });
-  }
 
   const portInput = await input({
     message: 'Port for the print server:',
@@ -99,16 +80,12 @@ async function runWizard() {
     printerName,
     printerModel,
     port: Number(portInput),
-    renderMode,
   };
   saveConfig(config);
 
   console.log(`\nSaved configuration:`);
   console.log(`  Printer:  ${config.printerName}`);
   console.log(`  Model:    ${config.printerModel}`);
-  if (config.printerModel === PRINTER_MODELS.OCOM) {
-    console.log(`  Renderer: ${config.renderMode}`);
-  }
   console.log(`  Port:     ${config.port}\n`);
 
   return config;

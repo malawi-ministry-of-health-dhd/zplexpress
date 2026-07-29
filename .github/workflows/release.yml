@@ -64,7 +64,7 @@ jobs:
           test "$(dpkg-deb --field "$package" Depends)" = \
             "nodejs (>= 18.0.0), cups, cups-client, xdg-utils"
           test "$(dpkg-deb --field "$package" Suggests)" = \
-            "ocom-ocbp-t4201-driver (>= 1.0.3)"
+            "ocom-ocbp-t4201-driver (>= 1.1.0)"
           (
             cd dist
             sha256sum ./*.deb > SHA256SUMS.txt

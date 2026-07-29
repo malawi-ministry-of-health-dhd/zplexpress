@@ -122,6 +122,15 @@ function absoluteOrigin(state) {
   };
 }
 
+function intersectsLabel(origin, widthDots, heightDots, media) {
+  return widthDots > 0
+    && heightDots > 0
+    && origin.x < media.widthDots
+    && origin.y < media.heightDots
+    && origin.x + widthDots > 0
+    && origin.y + heightDots > 0;
+}
+
 function addClippedLabelPage(doc, width, height) {
   const box = [0, 0, width, height];
   doc.addPage({
@@ -355,11 +364,11 @@ function fitFieldBlock(doc, state, value, origin, warnings) {
   return { ...chosen, blockWidthDots };
 }
 
-function drawText(doc, state, value, warnings) {
+function drawText(doc, state, value, warnings, ensurePage) {
   const origin = absoluteOrigin(state);
   if (origin.x >= state.media.widthDots || origin.y >= state.media.heightDots) {
     warnings.push(`Skipped text outside the configured label at ${origin.x},${origin.y}`);
-    return;
+    return false;
   }
 
   const fitted = state.fieldBlock
@@ -371,9 +380,34 @@ function drawText(doc, state, value, warnings) {
         blockWidthDots: state.media.widthDots - origin.x,
       };
 
+  if (!fitted.lines.some(line => String(line).trim().length)) {
+    warnings.push('Skipped a ZPL text field containing no printable characters');
+    return false;
+  }
+
+  const maximumLineWidthDots = Math.max(
+    1,
+    ...fitted.lines.map(line => (
+      measureText(doc, line, fitted.metrics) * state.media.dpi / POINTS_PER_INCH
+    )),
+  );
+  const textHeightDots = fitted.metrics.heightDots
+    + Math.max(0, fitted.lines.length - 1) * fitted.lineStepDots;
+  const rotation = state.font.rotation || state.defaultRotation;
+  const rotated = rotation === 'R' || rotation === 'B';
+  if (!intersectsLabel(
+    origin,
+    rotated ? textHeightDots : maximumLineWidthDots,
+    rotated ? maximumLineWidthDots : textHeightDots,
+    state.media,
+  )) {
+    warnings.push(`Skipped text outside the configured label at ${origin.x},${origin.y}`);
+    return false;
+  }
+
+  ensurePage();
   const x = dotsToPoints(origin.x, state.media.dpi);
   let yDots = state.fieldIsBaseline ? origin.y - fitted.metrics.heightDots : origin.y;
-  const rotation = state.font.rotation || state.defaultRotation;
 
   for (const line of fitted.lines) {
     const lineWidth = measureText(doc, line, fitted.metrics);
@@ -406,13 +440,18 @@ function drawText(doc, state, value, warnings) {
     doc.restore();
     yDots += fitted.lineStepDots;
   }
+  return true;
 }
 
-async function drawBarcode(doc, state, value, warnings) {
+async function drawBarcode(doc, state, value, warnings, ensurePage) {
   const barcode = state.barcode;
   const origin = absoluteOrigin(state);
-  const availableWidthDots = Math.max(1, state.media.widthDots - origin.x);
-  const availableHeightDots = Math.max(1, state.media.heightDots - origin.y);
+  const availableWidthDots = state.media.widthDots - origin.x;
+  const availableHeightDots = state.media.heightDots - origin.y;
+  if (availableWidthDots <= 0 || availableHeightDots <= 0) {
+    warnings.push(`Skipped barcode outside the configured label at ${origin.x},${origin.y}`);
+    return false;
+  }
   const requestedHeight = clamp(barcode.height, 8, availableHeightDots);
   const bcid = {
     BC: 'code128',
@@ -434,6 +473,7 @@ async function drawBarcode(doc, state, value, warnings) {
     }
 
     const png = await bwipjs.toBuffer(options);
+    ensurePage();
     const x = dotsToPoints(origin.x, state.media.dpi);
     const y = dotsToPoints(origin.y, state.media.dpi);
     const width = dotsToPoints(availableWidthDots, state.media.dpi);
@@ -462,20 +502,33 @@ async function drawBarcode(doc, state, value, warnings) {
         },
         font: { name: '0', rotation: 'N', height: 20, width: 18 },
       };
-      drawText(doc, readableState, value, warnings);
+      drawText(doc, readableState, value, warnings, ensurePage);
     }
+    return true;
   } catch (error) {
     warnings.push(`Could not render ${barcode.type} barcode: ${error.message}`);
+    return false;
   }
 }
 
-function drawBox(doc, state, args) {
+function drawBox(doc, state, args, warnings, ensurePage) {
   const [width, height, thickness = '1', color = 'B', rounding = '0'] = args.split(',');
   const origin = absoluteOrigin(state);
+  const widthDots = integer(width);
+  const heightDots = integer(height);
+  if (!intersectsLabel(origin, widthDots, heightDots, state.media)) {
+    warnings.push(`Skipped a ZPL box outside the configured label at ${origin.x},${origin.y}`);
+    return false;
+  }
+  const drawsInk = String(color).toUpperCase() !== 'W';
+  if (!ensurePage(drawsInk)) {
+    warnings.push('Skipped an all-white ZPL box on an empty label');
+    return false;
+  }
   const x = dotsToPoints(origin.x, state.media.dpi);
   const y = dotsToPoints(origin.y, state.media.dpi);
-  const w = dotsToPoints(integer(width), state.media.dpi);
-  const h = dotsToPoints(integer(height), state.media.dpi);
+  const w = dotsToPoints(widthDots, state.media.dpi);
+  const h = dotsToPoints(heightDots, state.media.dpi);
   const lineWidth = dotsToPoints(clamp(integer(thickness, 1), 1, 100), state.media.dpi);
   const radius = Math.min(w, h) * clamp(number(rounding), 0, 8) / 16;
 
@@ -485,12 +538,23 @@ function drawBox(doc, state, args) {
   if (radius > 0) doc.roundedRect(x, y, w, h, radius).stroke();
   else doc.rect(x, y, w, h).stroke();
   doc.restore();
+  return true;
 }
 
-function drawCircle(doc, state, args) {
+function drawCircle(doc, state, args, warnings, ensurePage) {
   const [diameter, thickness = '1', color = 'B'] = args.split(',');
   const origin = absoluteOrigin(state);
-  const d = dotsToPoints(integer(diameter), state.media.dpi);
+  const diameterDots = integer(diameter);
+  if (!intersectsLabel(origin, diameterDots, diameterDots, state.media)) {
+    warnings.push(`Skipped a ZPL circle outside the configured label at ${origin.x},${origin.y}`);
+    return false;
+  }
+  const drawsInk = String(color).toUpperCase() !== 'W';
+  if (!ensurePage(drawsInk)) {
+    warnings.push('Skipped an all-white ZPL circle on an empty label');
+    return false;
+  }
+  const d = dotsToPoints(diameterDots, state.media.dpi);
   doc.save()
     .lineWidth(dotsToPoints(clamp(integer(thickness, 1), 1, 100), state.media.dpi))
     .strokeColor(String(color).toUpperCase() === 'W' ? 'white' : 'black')
@@ -501,31 +565,44 @@ function drawCircle(doc, state, args) {
     )
     .stroke()
     .restore();
+  return true;
 }
 
-function drawUncompressedGraphic(doc, state, args, warnings) {
+function drawUncompressedGraphic(doc, state, args, warnings, ensurePage) {
   const parts = args.split(',');
   if (parts.length < 4) {
     warnings.push('Ignored malformed ^GF graphic');
-    return;
+    return false;
   }
 
   const compression = String(parts[0] || 'A').toUpperCase();
   if (compression !== 'A') {
     warnings.push(`^GF compression ${compression} is not supported by the local PDF renderer`);
-    return;
+    return false;
   }
 
   const rowBytes = integer(parts[3]);
   const hex = parts.slice(4).join('').replace(/\s+/g, '');
   if (rowBytes <= 0 || !/^[0-9A-Fa-f]*$/.test(hex)) {
     warnings.push('Ignored malformed ^GFA bitmap data');
-    return;
+    return false;
   }
 
   const bytes = Buffer.from(hex.length % 2 ? `${hex}0` : hex, 'hex');
   const rows = Math.floor(bytes.length / rowBytes);
   const origin = absoluteOrigin(state);
+  if (
+    rows <= 0
+    || !intersectsLabel(origin, rowBytes * 8, rows, state.media)
+  ) {
+    warnings.push(`Skipped a ZPL graphic outside the configured label at ${origin.x},${origin.y}`);
+    return false;
+  }
+  if (!bytes.subarray(0, rows * rowBytes).some(byte => byte !== 0)) {
+    warnings.push('Skipped an all-white ZPL graphic');
+    return false;
+  }
+  ensurePage();
   const dot = dotsToPoints(1, state.media.dpi);
   doc.save().fillColor('black');
 
@@ -548,6 +625,7 @@ function drawUncompressedGraphic(doc, state, args, warnings) {
     }
   }
   doc.restore();
+  return true;
 }
 
 async function renderZplToPdf(zpl, media = DEFAULT_MEDIA) {
@@ -589,11 +667,13 @@ async function renderZplToPdf(zpl, media = DEFAULT_MEDIA) {
   // A label format only earns a page once it draws something. ZPL streams
   // routinely open or close with a configuration-only format such as
   // ^XA^JUS^XZ, and giving that a page makes the printer feed a blank label.
-  const openPage = () => {
-    if (pageOpen) return;
+  const openPage = (drawsInk = true) => {
+    if (pageOpen) return true;
+    if (!drawsInk) return false;
     addClippedLabelPage(doc, pageWidth, pageHeight);
     pageOpen = true;
     pages += 1;
+    return true;
   };
 
   for (const token of commands) {
@@ -697,22 +777,18 @@ async function renderZplToPdf(zpl, media = DEFAULT_MEDIA) {
         readable: false,
       };
     } else if (command === '^GB') {
-      openPage();
-      drawBox(doc, state, args);
+      drawBox(doc, state, args, warnings, openPage);
     } else if (command === '^GC') {
-      openPage();
-      drawCircle(doc, state, args);
+      drawCircle(doc, state, args, warnings, openPage);
     } else if (command === '^GF') {
-      openPage();
-      drawUncompressedGraphic(doc, state, args, warnings);
+      drawUncompressedGraphic(doc, state, args, warnings, openPage);
     } else if (command === '^PQ') {
       state.copies = clamp(integer(args.split(',')[0], 1), 1, 999);
     } else if (command === '^FD') {
       const value = state.hexIndicator ? decodeHexField(args, state.hexIndicator) : args;
       if (!value.length) continue;
-      openPage();
-      if (state.barcode) await drawBarcode(doc, state, value, warnings);
-      else drawText(doc, state, value, warnings);
+      if (state.barcode) await drawBarcode(doc, state, value, warnings, openPage);
+      else drawText(doc, state, value, warnings, openPage);
     } else if (command === '^FS') {
       state.fieldBlock = null;
       state.barcode = null;
@@ -754,6 +830,7 @@ module.exports = {
   dotsToPoints,
   findZplContentOrigins,
   finishClippedLabelPage,
+  intersectsLabel,
   normalizeMedia,
   renderZplToPdf,
   rotateFieldOrigin,

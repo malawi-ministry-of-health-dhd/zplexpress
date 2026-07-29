@@ -7,7 +7,6 @@ const {
   PRINT_ROUTES,
   PRINTER_MODELS,
   normalizePrinterModel,
-  normalizeRenderMode,
   resolvePrintRoute,
 } = require('../config');
 
@@ -17,26 +16,23 @@ test('accepts the three supported printer models case-insensitively', () => {
   assert.equal(normalizePrinterModel('ocom'), PRINTER_MODELS.OCOM);
 });
 
-test('rejects unknown printer models and renderer modes', () => {
+test('rejects unknown printer models', () => {
   assert.throws(() => normalizePrinterModel('generic'), /ARGOX, ZEBRA, OCOM/);
-  assert.throws(() => normalizeRenderMode('RawZPL'), /PDFRaster or NativeTSPL/);
 });
 
-test('routes ARGOX/ZEBRA directly and only applies renderers to OCOM', () => {
+test('routes ARGOX/ZEBRA raw and all OCOM jobs through the installed driver', () => {
   assert.equal(
-    resolvePrintRoute(PRINTER_MODELS.ARGOX, 'ignored'),
-    PRINT_ROUTES.RAW_ZPL,
+    resolvePrintRoute(PRINTER_MODELS.ARGOX),
+    PRINT_ROUTES.RAW_COMMANDS,
   );
   assert.equal(
-    resolvePrintRoute(PRINTER_MODELS.ZEBRA, 'ignored'),
-    PRINT_ROUTES.RAW_ZPL,
+    resolvePrintRoute(PRINTER_MODELS.ZEBRA),
+    PRINT_ROUTES.RAW_COMMANDS,
   );
   assert.equal(
+    // A former PDFRaster value may still exist in an upgraded config. Extra
+    // arguments are deliberately ignored and cannot change the OCOM route.
     resolvePrintRoute(PRINTER_MODELS.OCOM, 'PDFRaster'),
-    PRINT_ROUTES.OCOM_PDF_RASTER,
-  );
-  assert.equal(
-    resolvePrintRoute(PRINTER_MODELS.OCOM, 'NativeTSPL'),
-    PRINT_ROUTES.OCOM_NATIVE_TSPL,
+    PRINT_ROUTES.OCOM_DRIVER,
   );
 });
