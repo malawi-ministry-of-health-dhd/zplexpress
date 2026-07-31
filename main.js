@@ -154,7 +154,7 @@ async function startServer(config) {
     }
     if (media.source === 'default') {
       rendered.warnings.push(
-        'CUPS PageSize was unavailable; used the default 101.6 x 39.9 mm media',
+        'CUPS PageSize was unavailable; used the default 102 x 36 mm media',
       );
     }
     return rendered;

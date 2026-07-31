@@ -168,19 +168,46 @@ test('parses the configured CUPS page size for PDF rendering', () => {
     dpi: 203,
   });
 
+  assert.deepEqual(parsePageSize('OCOM102x36'), {
+    pageSize: 'OCOM102x36',
+    widthMm: 102,
+    heightMm: 36,
+    widthDots: 815,
+    heightDots: 288,
+    dpi: 203,
+  });
+
+  assert.deepEqual(parsePageSize('ocom102x36'), {
+    pageSize: 'ocom102x36',
+    widthMm: 102,
+    heightMm: 36,
+    widthDots: 815,
+    heightDots: 288,
+    dpi: 203,
+  });
+
   const custom = parsePageSize('Custom.50.8x25.4mm');
   assert.equal(custom.widthMm, 50.8);
   assert.equal(custom.heightMm, 25.4);
   assert.equal(custom.widthDots, 406);
   assert.equal(custom.heightDots, 203);
+
+  assert.deepEqual(parsePageSize('Custom.102x36mm'), {
+    pageSize: 'Custom.102x36mm',
+    widthMm: 102,
+    heightMm: 36,
+    widthDots: 815,
+    heightDots: 288,
+    dpi: 203,
+  });
 });
 
-test('uses 4 x 1.57 inches as the fallback media', () => {
-  assert.equal(DEFAULT_MEDIA.pageSize, 'w288h113');
-  assert.equal(DEFAULT_MEDIA.widthDots, 812);
-  assert.equal(DEFAULT_MEDIA.heightDots, 319);
-  assert.ok(Math.abs(DEFAULT_MEDIA.widthMm - 101.6) < 0.001);
-  assert.ok(Math.abs(DEFAULT_MEDIA.heightMm - 39.86) < 0.01);
+test('uses 102 x 36 mm as the fallback media', () => {
+  assert.equal(DEFAULT_MEDIA.pageSize, 'OCOM102x36');
+  assert.equal(DEFAULT_MEDIA.widthDots, 815);
+  assert.equal(DEFAULT_MEDIA.heightDots, 288);
+  assert.equal(DEFAULT_MEDIA.widthMm, 102);
+  assert.equal(DEFAULT_MEDIA.heightMm, 36);
 });
 
 test('reads the active PageSize from detailed CUPS PPD options', () => {

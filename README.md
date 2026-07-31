@@ -37,8 +37,8 @@ avoids the harmless `_apt` sandbox notice you get when installing from
 `~/Downloads`:
 
 ```bash
-DRIVER_VER=1.1.1
-ZPLEXPRESS_VER=1.5.1
+DRIVER_VER=1.1.2
+ZPLEXPRESS_VER=1.5.2
 
 curl -fsSLO "https://github.com/malawi-ministry-of-health-dhd/linux_printer_driver/releases/download/v${DRIVER_VER}/ocom-ocbp-t4201-driver_${DRIVER_VER}_amd64.deb"
 curl -fsSLO "https://github.com/malawi-ministry-of-health-dhd/zplexpress/releases/download/v${ZPLEXPRESS_VER}/zplexpress_${ZPLEXPRESS_VER}_all.deb"
@@ -91,7 +91,7 @@ Your printer/port config in `/etc/zplexpress/config.json` is preserved.
 
 Every push to `main` runs the tests, builds a Debian package, and creates a
 `build-<run number>` prerelease with the `.deb` attached. Pushing a version tag
-such as `v1.5.1` creates the normal versioned GitHub Release.
+such as `v1.5.2` creates the normal versioned GitHub Release.
 
 ## Development / manual setup
 
@@ -249,7 +249,7 @@ length.
 ```bash
 curl -X POST http://localhost:3000/print \
   -H 'Content-Type: application/json' \
-  --data '{"zpl":"^XA^PW812^LL319^FO80,25^BY3^BCN,110,Y,N,N^FDJOHNDOE^FS^FO285,210^A0N,34,34^FDJOHN DOE^FS^XZ"}'
+  --data '{"zpl":"^XA^PW815^LL288^FO80,25^BY3^BCN,110,Y,N,N^FDJOHNDOE^FS^FO285,210^A0N,34,34^FDJOHN DOE^FS^XZ"}'
 ```
 
 Preview the same label locally without printing:
@@ -257,7 +257,7 @@ Preview the same label locally without printing:
 ```bash
 curl -X POST http://localhost:3000/render \
   -H 'Content-Type: application/json' \
-  --data '{"zpl":"^XA^PW812^LL319^FO10,5^A0N,30,30^FDTEST^FS^XZ"}' \
+  --data '{"zpl":"^XA^PW815^LL288^FO10,5^A0N,30,30^FDTEST^FS^XZ"}' \
   --output label-preview.pdf
 ```
 
@@ -288,8 +288,8 @@ Set the size on the CUPS queue. The OCOM driver uses it for every printed label,
 and ZPLExpress uses it for `/render` previews:
 
 ```bash
-# Default: 4 x 1.57 in (101.6 x 39.9 mm)
-sudo lpadmin -p OCOM_Ubuntu_Driver -o PageSize=w288h113
+# Default: 102 x 36 mm
+sudo lpadmin -p OCOM_Ubuntu_Driver -o PageSize=OCOM102x36
 
 # Confirm it
 sudo lpoptions -p OCOM_Ubuntu_Driver |
@@ -298,7 +298,7 @@ sudo lpoptions -p OCOM_Ubuntu_Driver |
 ```
 
 For a custom size supported by the driver, use a CUPS custom media name such
-as `Custom.101.6x39.9mm`. Do not rely on `^LL` to configure the stock; `^LL`
+as `Custom.102x36mm`. Do not rely on `^LL` to configure the stock; `^LL`
 only describes the ZPL drawing canvas, and EPL `Q` only describes its logical
 canvas.
 
@@ -319,7 +319,7 @@ If the configured OCOM USB printer is unplugged, this endpoint returns HTTP
 ## Requirements
 
 - Node.js 18+
-- `ocom-ocbp-t4201-driver` 1.1.1 or newer for an OCOM OCBP-T4201
+- `ocom-ocbp-t4201-driver` 1.1.2 or newer for an OCOM OCBP-T4201
 - A compatible raw CUPS queue for ARGOX or ZEBRA
 - CUPS and a USB connection to the printer
 

@@ -70,6 +70,29 @@ test('renders Code 128 and honors ^PQ copies', async () => {
   assert.deepEqual(rendered.warnings, []);
 });
 
+test('defaults ZPL rendering to one exact 102 x 36 mm PDF label', async () => {
+  const rendered = await renderZplToPdf(
+    '^XA^FO10,5^A0N,30,30^FDDEFAULT MEDIA^FS^XZ',
+  );
+  const pdfText = rendered.pdf.toString('latin1');
+
+  assert.deepEqual(rendered.media, {
+    pageSize: 'OCOM102x36',
+    widthMm: 102,
+    heightMm: 36,
+    widthDots: 815,
+    heightDots: 288,
+    dpi: 203,
+  });
+  for (const box of ['MediaBox', 'CropBox', 'TrimBox', 'BleedBox', 'ArtBox']) {
+    assert.match(
+      pdfText,
+      new RegExp(`/${box} \\[0 0 289\\.133858 102\\.047244\\]`),
+    );
+  }
+  assert.match(pdfText, /0 0 289\.133858 102\.047244 re\s+W n/);
+});
+
 test('locks ZPL to one label page and anchors its content at the PDF top-left', async () => {
   const rendered = await renderZplToPdf(
     '^XA^PW750^LL450^LH20,10^FO35,30^A0N,20,20^FDTOP LEFT^FS^PQ1^XZ',

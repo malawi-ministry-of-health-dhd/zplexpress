@@ -1,6 +1,6 @@
 {
   "name": "zpl",
-  "version": "1.5.1",
+  "version": "1.5.2",
   "description": "ZPL/EPL-aware printing service for raw printers and the OCOM CUPS driver",
   "main": "main.js",
   "scripts": {

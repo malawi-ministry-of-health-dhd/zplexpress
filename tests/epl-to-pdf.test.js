@@ -85,6 +85,29 @@ test('renders MAHIS lines, multiple labels, and EPL P copies', async () => {
   assert.equal(pageMatches.length, 2);
 });
 
+test('defaults EPL rendering to one exact 102 x 36 mm PDF label', async () => {
+  const rendered = await renderEplToPdf(
+    'N\nA10,5,0,3,1,1,N,"DEFAULT MEDIA"\nP1\n',
+  );
+  const pdfText = rendered.pdf.toString('latin1');
+
+  assert.deepEqual(rendered.media, {
+    pageSize: 'OCOM102x36',
+    widthMm: 102,
+    heightMm: 36,
+    widthDots: 815,
+    heightDots: 288,
+    dpi: 203,
+  });
+  for (const box of ['MediaBox', 'CropBox', 'TrimBox', 'BleedBox', 'ArtBox']) {
+    assert.match(
+      pdfText,
+      new RegExp(`/${box} \\[0 0 289\\.133858 102\\.047244\\]`),
+    );
+  }
+  assert.match(pdfText, /0 0 289\.133858 102\.047244 re\s+W n/);
+});
+
 test('multiplies EPL P sets and per-label copies', async () => {
   const rendered = await renderEplToPdf(
     'N\nA0,0,0,3,1,1,N,"SIX COPIES"\nP2,3\n',

@@ -12,13 +12,13 @@ const OCOM_COMMAND_FORMATS = Object.freeze({
   [COMMAND_LANGUAGES.ZPL]: OCOM_ZPL_FORMAT,
   [COMMAND_LANGUAGES.EPL]: OCOM_EPL_FORMAT,
 });
-const DEFAULT_MEDIA_NAME = 'w288h113';
+const DEFAULT_MEDIA_NAME = 'OCOM102x36';
 const DEFAULT_MEDIA = Object.freeze({
   pageSize: DEFAULT_MEDIA_NAME,
-  widthMm: 101.6,
-  heightMm: 113 * 25.4 / 72,
-  widthDots: 812,
-  heightDots: 319,
+  widthMm: 102,
+  heightMm: 36,
+  widthDots: 815,
+  heightDots: 288,
   dpi: 203,
 });
 const COMMAND_OPTIONS = { encoding: 'utf8', maxBuffer: 1024 * 1024, timeout: 5000 };
@@ -97,6 +97,10 @@ function parseMarkedLpOption(stdout, optionNames = ['PageSize', 'media']) {
 
 function parsePageSize(pageSize) {
   const value = String(pageSize || '');
+  if (value.toLowerCase() === DEFAULT_MEDIA_NAME.toLowerCase()) {
+    return { ...DEFAULT_MEDIA, pageSize: value };
+  }
+
   let match = value.match(/^w(\d+(?:\.\d+)?)h(\d+(?:\.\d+)?)$/i);
   if (match) {
     const widthPoints = Number(match[1]);

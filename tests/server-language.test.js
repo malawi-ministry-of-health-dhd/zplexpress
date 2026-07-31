@@ -17,7 +17,7 @@ const EPL = `\r\n${[
   'B100,30,0,1,3,8,80,N,"P1001"',
   'P1',
 ].join('\r\n')}\r\n`;
-const ZPL = '\r\n^XA^PW812^LL319^FO10,5^A0N,30,30^FDZPL TEST^FS^XZ\r\n';
+const ZPL = '\r\n^XA^PW815^LL288^FO10,5^A0N,30,30^FDZPL TEST^FS^XZ\r\n';
 
 function writeCommand(directory, name, contents) {
   const filename = path.join(directory, name);
