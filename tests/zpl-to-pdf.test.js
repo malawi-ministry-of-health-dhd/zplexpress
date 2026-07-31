@@ -93,7 +93,7 @@ test('defaults ZPL rendering to one exact 102 x 36 mm PDF label', async () => {
   assert.match(pdfText, /0 0 289\.133858 102\.047244 re\s+W n/);
 });
 
-test('locks ZPL to one label page and anchors its content at the PDF top-left', async () => {
+test('locks ZPL to one label page and preserves its label-home and field margins', async () => {
   const rendered = await renderZplToPdf(
     '^XA^PW750^LL450^LH20,10^FO35,30^A0N,20,20^FDTOP LEFT^FS^PQ1^XZ',
     LABEL_4_X_1_57,
@@ -109,7 +109,7 @@ test('locks ZPL to one label page and anchors its content at the PDF top-left', 
     assert.match(pdfText, new RegExp(`/${box} \\[0 0 288 113\\]`));
   }
   assert.match(pdfText, /0 0 288 113 re\s+W n/);
-  assert.match(pdfText, /1 0 0 1 0 \d+(?:\.\d+)? Tm/);
+  assert.match(pdfText, /1 0 0 1 19\.507389 93\.719606 Tm/);
 });
 
 test('anchors a rotated field by the top-left corner of the rotated field', () => {

@@ -4,7 +4,7 @@ Section: utils
 Priority: optional
 Architecture: all
 Depends: nodejs (>= 18.0.0), cups, cups-client, xdg-utils
-Suggests: ocom-ocbp-t4201-driver (>= 1.1.2)
+Suggests: ocom-ocbp-t4201-driver (>= 1.1.3)
 Maintainer: Louis Nyirongo <louisnyirongo@lukeinternational.no>
 Homepage: https://github.com/malawi-ministry-of-health-dhd/zplexpress
 Description: ZPL/EPL-aware service for ARGOX, ZEBRA, and OCOM printers

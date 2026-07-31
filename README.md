@@ -37,8 +37,8 @@ avoids the harmless `_apt` sandbox notice you get when installing from
 `~/Downloads`:
 
 ```bash
-DRIVER_VER=1.1.2
-ZPLEXPRESS_VER=1.5.2
+DRIVER_VER=1.1.3
+ZPLEXPRESS_VER=1.5.3
 
 curl -fsSLO "https://github.com/malawi-ministry-of-health-dhd/linux_printer_driver/releases/download/v${DRIVER_VER}/ocom-ocbp-t4201-driver_${DRIVER_VER}_amd64.deb"
 curl -fsSLO "https://github.com/malawi-ministry-of-health-dhd/zplexpress/releases/download/v${ZPLEXPRESS_VER}/zplexpress_${ZPLEXPRESS_VER}_all.deb"
@@ -91,7 +91,7 @@ Your printer/port config in `/etc/zplexpress/config.json` is preserved.
 
 Every push to `main` runs the tests, builds a Debian package, and creates a
 `build-<run number>` prerelease with the `.deb` attached. Pushing a version tag
-such as `v1.5.2` creates the normal versioned GitHub Release.
+such as `v1.5.3` creates the normal versioned GitHub Release.
 
 ## Development / manual setup
 
@@ -241,10 +241,10 @@ accepted, while `zpl` and `epl` remain supported for compatibility.
 For OCOM printing, ZPLExpress does not render or rewrite the command payload.
 It sends the exact received UTF-8 bytes to CUPS with the detected language MIME
 type. The OCOM driver reads the selected queue `PageSize`, creates a PDF with
-that exact physical media box, anchors content at the top-left, clips drawing
-to one label, rasterizes it, and produces TSPL. ZPL `^PW`/`^LL` and EPL `q`/`Q`
-remain logical drawing coordinates and cannot change the physical label feed
-length.
+that exact physical media box, preserves the supplied field coordinates and
+intentional margins, clips drawing to one label, rasterizes it, and produces
+TSPL. ZPL `^PW`/`^LL` and EPL `q`/`Q` remain logical drawing coordinates and
+cannot change the physical label feed length.
 
 ```bash
 curl -X POST http://localhost:3000/print \
@@ -263,9 +263,9 @@ curl -X POST http://localhost:3000/render \
 
 EPL sent by MAHIS is accepted even when it is carried in the legacy `zpl`
 property. The preview endpoint renders its relative reference layout, fixed EPL
-font metrics, lines, boxes, rotations, barcodes, and copies. Any unused positive
-reference/field offset surrounding the whole label is normalized away so the
-content is anchored at the PDF top-left:
+font metrics, lines, boxes, rotations, barcodes, and copies. EPL reference and
+field coordinates are preserved so margins encoded by the source label are not
+clipped at the PDF or printer edge:
 
 ```bash
 curl -X POST http://localhost:3000/render \
@@ -319,7 +319,7 @@ If the configured OCOM USB printer is unplugged, this endpoint returns HTTP
 ## Requirements
 
 - Node.js 18+
-- `ocom-ocbp-t4201-driver` 1.1.2 or newer for an OCOM OCBP-T4201
+- `ocom-ocbp-t4201-driver` 1.1.3 or newer for an OCOM OCBP-T4201
 - A compatible raw CUPS queue for ARGOX or ZEBRA
 - CUPS and a USB connection to the printer
 

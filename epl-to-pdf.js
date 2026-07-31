@@ -78,22 +78,20 @@ function tokenizeEpl(epl) {
     .filter(Boolean);
 }
 
-function createState(media, contentOrigin = { x: 0, y: 0 }) {
+function createState(media) {
   return {
     media,
     referenceX: 0,
     referenceY: 0,
     direction: 'ZT',
     copies: 1,
-    contentOriginX: integer(contentOrigin.x),
-    contentOriginY: integer(contentOrigin.y),
   };
 }
 
 function absoluteOrigin(state, x, y) {
   return {
-    x: state.referenceX + integer(x) - state.contentOriginX,
-    y: state.referenceY + integer(y) - state.contentOriginY,
+    x: state.referenceX + integer(x),
+    y: state.referenceY + integer(y),
   };
 }
 
@@ -310,8 +308,8 @@ async function drawBarcode(doc, state, fields, warnings, ensurePage) {
 
     if (String(readableValue).toUpperCase() !== 'N') {
       drawText(doc, state, [
-        String(origin.x + state.contentOriginX - state.referenceX),
-        String(origin.y + state.contentOriginY - state.referenceY + heightDots + 2),
+        String(origin.x - state.referenceX),
+        String(origin.y - state.referenceY + heightDots + 2),
         rotation,
         '2',
         '1',
@@ -367,8 +365,8 @@ function drawBox(doc, state, fields, warnings, ensurePage) {
   }
   const [xValue, yValue, thicknessValue, rightValue, bottomValue] = fields;
   const origin = absoluteOrigin(state, xValue, yValue);
-  const right = state.referenceX + integer(rightValue) - state.contentOriginX;
-  const bottom = state.referenceY + integer(bottomValue) - state.contentOriginY;
+  const right = state.referenceX + integer(rightValue);
+  const bottom = state.referenceY + integer(bottomValue);
   const width = right - origin.x;
   const height = bottom - origin.y;
   if (width <= 0 || height <= 0) {
@@ -434,7 +432,6 @@ async function renderEplToPdf(epl, media = DEFAULT_MEDIA) {
   const contentOrigins = findEplContentOrigins(lines);
   let state = null;
   let pageOpen = false;
-  let formatIndex = 0;
   let pages = 0;
   let copies = 1;
   let emptyFormats = 0;
@@ -457,8 +454,9 @@ async function renderEplToPdf(epl, media = DEFAULT_MEDIA) {
         pageOpen = false;
         warnings.push('Started a new EPL label before the previous label had a P command');
       }
-      state = createState(normalizedMedia, contentOrigins[formatIndex]);
-      formatIndex += 1;
+      // Preserve the EPL reference and field coordinates. contentOrigins is
+      // diagnostic only; subtracting it removes intentional safety margins.
+      state = createState(normalizedMedia);
       continue;
     }
     if (!state) continue;

@@ -133,7 +133,7 @@ test('rejects EPL print quantities that exceed the 999-label limit', async () =>
   );
 });
 
-test('locks the reported EPL sample to one top-left-anchored label page', async () => {
+test('preserves the reported EPL sample margins on one exact-size label page', async () => {
   const epl = [
     'N',
     'q801',
@@ -144,7 +144,7 @@ test('locks the reported EPL sample to one top-left-anchored label page', async 
     'A35,76,0,3,1,1,N,"MRN: P100100000025  DOB: 1969-03-11"',
     'P1',
   ].join('\n');
-  const rendered = await renderEplToPdf(epl, LABEL_4_X_1_57);
+  const rendered = await renderEplToPdf(epl);
   const pdfText = rendered.pdf.toString('latin1');
   const physicalPages = pdfText.match(/\/Type \/Page\b/g) || [];
 
@@ -153,10 +153,18 @@ test('locks the reported EPL sample to one top-left-anchored label page', async 
   assert.equal(physicalPages.length, 1);
   assert.deepEqual(rendered.contentOrigins, [{ x: 35, y: 30 }]);
   for (const box of ['MediaBox', 'CropBox', 'TrimBox', 'BleedBox', 'ArtBox']) {
-    assert.match(pdfText, new RegExp(`/${box} \\[0 0 288 113\\]`));
+    assert.match(
+      pdfText,
+      new RegExp(`/${box} \\[0 0 289\\.133858 102\\.047244\\]`),
+    );
   }
-  assert.match(pdfText, /0 0 288 113 re\s+W n/);
-  assert.match(pdfText, /1 0 0 1 0 \d+(?:\.\d+)? Tm/);
+  assert.match(pdfText, /0 0 289\.133858 102\.047244 re\s+W n/);
+  assert.match(pdfText, /1 0 0 1 12\.413793 86\.944978 Tm/);
+  assert.match(pdfText, /1 0 0 1 12\.413793 70\.629707 Tm/);
+  assert.match(
+    pdfText,
+    /\d+(?:\.\d+)? 0 0 -\d+(?:\.\d+)? 17\.73399 81\.576355 cm/,
+  );
   assert.deepEqual(rendered.warnings, []);
 });
 
@@ -164,11 +172,11 @@ test('keeps the rotated reverse-video Urgent flag on the accession label', async
   const rendered = await renderEplToPdf(MAHIS_ACCESSION_EPL, LABEL_4_X_1_57);
   const pdfText = rendered.pdf.toString('latin1');
 
-  // " Urgent " normalizes to x=0 and is rotated 90 degrees. Rotating about the
-  // origin alone put its whole cell at negative x, where the label clip threw
-  // it away. Font 1 is 12 dots high, so the field is translated back by
-  // 12 dots (4.2562 pt) and stays on the label.
+  // " Urgent " begins at R130 + x80 = 210 dots and is rotated 90 degrees.
+  // Font 1 is 12 dots high, so the field is translated by 12 dots (4.2562 pt)
+  // before rotation and remains within the label.
   assert.match(pdfText, /1 0 0 1 4\.25\d+ 0 cm/);
+  assert.match(pdfText, /1 0 0 1 74\.482759 \d+(?:\.\d+)? Tm/);
   assert.deepEqual(rendered.warnings, []);
 });
 
@@ -192,10 +200,13 @@ test('keeps content origins aligned with their own label after an empty format',
   ].join('\n');
   const rendered = await renderEplToPdf(epl, LABEL_4_X_1_57);
 
-  // The skipped format still owns contentOrigins[0]; the drawn label must use
-  // its own origin, not the placeholder left by the empty one.
+  // The skipped format still owns contentOrigins[0], while the drawn label
+  // keeps its authored 35-dot left margin.
   assert.deepEqual(rendered.contentOrigins, [{ x: 0, y: 0 }, { x: 35, y: 30 }]);
-  assert.match(rendered.pdf.toString('latin1'), /1 0 0 1 0 \d+(?:\.\d+)? Tm/);
+  assert.match(
+    rendered.pdf.toString('latin1'),
+    /1 0 0 1 12\.413793 97\.897734 Tm/,
+  );
 });
 
 for (const [description, epl] of [

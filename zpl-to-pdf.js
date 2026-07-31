@@ -78,7 +78,7 @@ function tokenize(zpl) {
   return commands;
 }
 
-function baseState(media, contentOrigin = { x: 0, y: 0 }) {
+function baseState(media) {
   return {
     media,
     x: 0,
@@ -96,8 +96,6 @@ function baseState(media, contentOrigin = { x: 0, y: 0 }) {
     barcodeDefaults: { module: 2, ratio: 3, height: 100 },
     hexIndicator: null,
     copies: 1,
-    contentOriginX: integer(contentOrigin.x),
-    contentOriginY: integer(contentOrigin.y),
   };
 }
 
@@ -115,11 +113,7 @@ function sourceOrigin(state) {
 }
 
 function absoluteOrigin(state) {
-  const origin = sourceOrigin(state);
-  return {
-    x: origin.x - state.contentOriginX,
-    y: origin.y - state.contentOriginY,
-  };
+  return sourceOrigin(state);
 }
 
 function intersectsLabel(origin, widthDots, heightDots, media) {
@@ -659,7 +653,6 @@ async function renderZplToPdf(zpl, media = DEFAULT_MEDIA) {
   const contentOrigins = findZplContentOrigins(commands, normalizedMedia);
   let state = null;
   let pageOpen = false;
-  let pageIndex = 0;
   let pages = 0;
   let copies = 1;
   let emptyFormats = 0;
@@ -686,8 +679,9 @@ async function renderZplToPdf(zpl, media = DEFAULT_MEDIA) {
         pageOpen = false;
         warnings.push('Started a new ZPL label before the previous label had a ^XZ command');
       }
-      state = baseState(normalizedMedia, contentOrigins[pageIndex]);
-      pageIndex += 1;
+      // Preserve the ZPL label-home and field coordinates. contentOrigins is
+      // diagnostic only; subtracting it removes intentional safety margins.
+      state = baseState(normalizedMedia);
       continue;
     }
     if (!state) continue;
