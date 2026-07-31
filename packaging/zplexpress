@@ -1,5 +1,0 @@
-#!/bin/sh
-# CLI wrapper for the packaged ZPL service.
-# Points the app at the system config and installed location.
-exec env ZPL_CONFIG="${ZPL_CONFIG:-/etc/zplexpress/config.json}" \
-  node /opt/zplexpress/main.js "$@"
