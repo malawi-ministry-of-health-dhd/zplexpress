@@ -10,60 +10,36 @@ CUPS.
 
 ## Production installation
 
-Requirements:
+### 1. Install CUPS on Ubuntu
 
-- Linux with systemd and CUPS
-- A printer queue visible in `lpstat -e`
-- Node.js 18 or newer and npm
+Check whether CUPS is already available:
 
-### 1. Clone the repository
+```bash
+command -v lpstat
+```
 
-Install the system tools and confirm that Node.js 18 or newer is available:
+If that command returns nothing, install and start CUPS:
 
 ```bash
 sudo apt update
-sudo apt install -y git cups cups-client
-node --version
+sudo apt install -y cups cups-client
+sudo systemctl enable --now cups
 ```
 
-Clone the production branch and install its dependencies:
+Confirm that CUPS is running and list its printer queues:
 
 ```bash
-git clone --branch pdf --single-branch \
-  https://github.com/malawi-ministry-of-health-dhd/zplexpress.git
-cd zplexpress
-npm ci --omit=dev
+systemctl is-active cups
+lpstat -e
 ```
 
-For an OCOM OCBP-T4201, obtain a compatible driver package by following the
-download/build instructions in the
-[OCOM Linux driver repository](https://github.com/malawi-ministry-of-health-dhd/linux_printer_driver).
-Replace `OCOM_DRIVER_FILE.deb` below with the exact downloaded filename:
+The printer must have a CUPS queue before it can be selected in ZPLExpress.
 
-```bash
-cd ~/Downloads
-sudo apt install ./OCOM_DRIVER_FILE.deb
-cd -
-```
+### 2. Install the OCOM driver (OCOM only)
 
-Zebra and Argox users skip the OCOM driver.
+Zebra and Argox users skip this section.
 
-Configure the printer, then install and start the system service:
-
-```bash
-npm run setup
-npm run install-service
-```
-
-Open the dashboard on the port selected during setup. The default is
-[http://localhost:3000](http://localhost:3000).
-
-Keep the cloned directory in place because the systemd service runs the
-application from that directory.
-
-### 2. Install the Debian package
-
-For OCOM, first obtain a compatible package from the
+For an OCOM OCBP-T4201, obtain a compatible driver package from the
 [OCOM Linux driver repository](https://github.com/malawi-ministry-of-health-dhd/linux_printer_driver).
 Replace `OCOM_DRIVER_FILE.deb` with the exact downloaded filename:
 
@@ -72,7 +48,14 @@ cd ~/Downloads
 sudo apt install ./OCOM_DRIVER_FILE.deb
 ```
 
-Zebra and Argox users skip that step.
+Connect the printer and configure its queue if installation did not do so
+automatically:
+
+```bash
+sudo ocom-t4201-setup --media-tracking Calibrated --no-test
+```
+
+### 3. Install the ZPLExpress Debian package
 
 Obtain a ZPLExpress `.deb` built from the `pdf` branch for your deployment.
 Replace `ZPLEXPRESS_FILE.deb` with the exact downloaded filename:
@@ -157,15 +140,6 @@ sudo systemctl restart zpl.service
 sudo journalctl -u zpl.service -f
 ```
 
-To update a source installation:
-
-```bash
-cd /path/to/zplexpress
-git pull --ff-only origin pdf
-npm ci --omit=dev
-sudo systemctl restart zpl.service
-```
-
 To update a Debian installation, run `sudo apt install` with the exact
 filename of the newer package.
 
@@ -195,11 +169,3 @@ sudo journalctl -u zpl.service -n 100 --no-pager
 
 ZPLExpress has no built-in authentication and listens on the local network.
 Run it only on a trusted network or protect it with a firewall/reverse proxy.
-
-## Development
-
-```bash
-npm ci
-npm test
-node main.js
-```
