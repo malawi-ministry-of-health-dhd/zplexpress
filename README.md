@@ -35,30 +35,67 @@ lpstat -e
 
 The printer must have a CUPS queue before it can be selected in ZPLExpress.
 
-### 2. Install the OCOM driver (OCOM only)
+### 2. Clone and run in production
 
-Zebra and Argox users skip this section.
+Install Node.js 18 or newer and npm, then confirm their versions:
+
+```bash
+node --version
+npm --version
+```
+
+Clone the repository and install the production dependencies:
+
+```bash
+git clone https://github.com/malawi-ministry-of-health-dhd/zplexpress.git
+cd zplexpress
+npm ci --omit=dev
+```
 
 For an OCOM OCBP-T4201, obtain a compatible driver package from the
+[OCOM Linux driver repository](https://github.com/malawi-ministry-of-health-dhd/linux_printer_driver)
+and install it before configuring ZPLExpress. Zebra and Argox users skip this
+step. Replace `OCOM_DRIVER_FILE.deb` with the exact downloaded filename.
+
+```bash
+cd ~/Downloads
+sudo apt install ./OCOM_DRIVER_FILE.deb
+cd -
+```
+
+Configure the printer and install the production systemd service:
+
+```bash
+npm run setup
+npm run install-service
+```
+
+Confirm that it is running:
+
+```bash
+sudo systemctl status zpl.service
+```
+
+Open the dashboard on the port selected during setup. The default is
+[http://localhost:3000](http://localhost:3000).
+
+Keep the cloned directory in place because the systemd service runs
+ZPLExpress from that directory.
+
+### 3. Install the Debian package
+
+For OCOM, first obtain and install the compatible driver from the
 [OCOM Linux driver repository](https://github.com/malawi-ministry-of-health-dhd/linux_printer_driver).
-Replace `OCOM_DRIVER_FILE.deb` with the exact downloaded filename:
+Zebra and Argox users skip this step. Replace `OCOM_DRIVER_FILE.deb` with the
+exact downloaded filename.
 
 ```bash
 cd ~/Downloads
 sudo apt install ./OCOM_DRIVER_FILE.deb
 ```
 
-Connect the printer and configure its queue if installation did not do so
-automatically:
-
-```bash
-sudo ocom-t4201-setup --media-tracking Calibrated --no-test
-```
-
-### 3. Install the ZPLExpress Debian package
-
-Obtain a ZPLExpress `.deb` built from the `pdf` branch for your deployment.
-Replace `ZPLEXPRESS_FILE.deb` with the exact downloaded filename:
+Obtain the ZPLExpress `.deb` supplied for your deployment. Replace
+`ZPLEXPRESS_FILE.deb` with its exact filename:
 
 ```bash
 cd ~/Downloads
