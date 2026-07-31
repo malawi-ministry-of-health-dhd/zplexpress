@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <rect width="128" height="128" rx="24" fill="#2563eb"/>
+  <!-- printer body -->
+  <rect x="26" y="52" width="76" height="40" rx="6" fill="#1e40af"/>
+  <circle cx="90" cy="64" r="4" fill="#93c5fd"/>
+  <!-- paper feeding out (label) -->
+  <rect x="38" y="72" width="52" height="34" rx="4" fill="#ffffff"/>
+  <!-- barcode on the label -->
+  <g fill="#1e293b">
+    <rect x="45" y="80" width="3" height="18"/>
+    <rect x="51" y="80" width="2" height="18"/>
+    <rect x="56" y="80" width="4" height="18"/>
+    <rect x="63" y="80" width="2" height="18"/>
+    <rect x="68" y="80" width="3" height="18"/>
+    <rect x="74" y="80" width="2" height="18"/>
+    <rect x="79" y="80" width="4" height="18"/>
+  </g>
+  <!-- top slot -->
+  <rect x="40" y="30" width="48" height="18" rx="3" fill="#1e40af"/>
+</svg>

@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ZPL Print Service</title>
+  <style>
+    :root {
+      --bg: #f5f6f8; --card: #ffffff; --text: #1a1d21; --muted: #6b7280;
+      --border: #e5e7eb; --ok: #16a34a; --ok-bg: #dcfce7;
+      --warn: #d97706; --warn-bg: #fef3c7; --err: #dc2626; --err-bg: #fee2e2;
+      --accent: #2563eb;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0f1115; --card: #191c22; --text: #e6e8eb; --muted: #9aa1ab;
+        --border: #2a2e37; --ok: #4ade80; --ok-bg: #14331f;
+        --warn: #fbbf24; --warn-bg: #3a2e0a; --err: #f87171; --err-bg: #3a1414;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; background: var(--bg); color: var(--text);
+      font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      padding: 32px 16px;
+    }
+    .wrap { max-width: 760px; margin: 0 auto; }
+    header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 24px; flex-wrap: wrap; }
+    h1 { font-size: 20px; margin: 0; }
+    h2 { font-size: 14px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 0 0 12px; }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 20px; margin-bottom: 20px; }
+    .pill { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 600; padding: 5px 12px; border-radius: 999px; }
+    .pill.ok { background: var(--ok-bg); color: var(--ok); }
+    .pill.err { background: var(--err-bg); color: var(--err); }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+    .dot.live { animation: pulse 1.6s ease-in-out infinite; }
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+    .row { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+    .row[hidden] { display: none; }
+    .row:last-child { border-bottom: none; }
+    .row .k { color: var(--muted); }
+    .row .v { font-weight: 500; text-align: right; word-break: break-all; }
+    .row .v.ok { color: var(--ok); }
+    .row .v.err { color: var(--err); }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--border); font-size: 14px; }
+    th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+    tr:last-child td { border-bottom: none; }
+    .badge { font-size: 12px; font-weight: 600; padding: 3px 9px; border-radius: 6px; white-space: nowrap; }
+    .badge.running { background: var(--ok-bg); color: var(--ok); }
+    .badge.pending { background: var(--warn-bg); color: var(--warn); }
+    .empty { color: var(--muted); text-align: center; padding: 24px 0; }
+    select, input { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; max-width: 100%; }
+    select { cursor: pointer; }
+    select:disabled, input:disabled, button:disabled { opacity: .6; cursor: default; }
+    input[type=number] { width: 100px; }
+    button { font: inherit; font-weight: 600; color: #fff; background: var(--accent); border: none; border-radius: 8px; padding: 7px 14px; margin-left: 6px; cursor: pointer; }
+    .msg { margin-top: 12px; font-size: 13px; padding: 8px 12px; border-radius: 8px; }
+    .msg.ok { background: var(--ok-bg); color: var(--ok); }
+    .msg.err { background: var(--err-bg); color: var(--err); }
+    .hint { color: var(--muted); font-size: 13px; margin: 10px 0 0; }
+    .foot { color: var(--muted); font-size: 13px; text-align: center; margin-top: 8px; }
+    .table-wrap { overflow-x: auto; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>ZPL Print Service</h1>
+      <span id="service" class="pill ok"><span class="dot live"></span> Running</span>
+    </header>
+
+    <div class="card">
+      <h2>Printer</h2>
+      <div class="row">
+        <span class="k">Active printer</span>
+        <span class="v"><select id="printer-select"><option>Loading…</option></select></span>
+      </div>
+      <div class="row">
+        <span class="k">Printer model</span>
+        <span class="v">
+          <select id="printer-model-select">
+            <option value="ARGOX">ARGOX — raw ZPL/EPL</option>
+            <option value="ZEBRA">ZEBRA — raw ZPL/EPL</option>
+            <option value="OCOM">OCOM — ZPL/EPL driver</option>
+          </select>
+        </span>
+      </div>
+      <div class="row"><span class="k">State</span><span class="v" id="printer-state">—</span></div>
+      <div class="row"><span class="k">Connection</span><span class="v" id="printer-connection">—</span></div>
+      <div class="row"><span class="k">Print path</span><span class="v" id="printer-driver">—</span></div>
+      <div class="row"><span class="k">Last command</span><span class="v" id="last-command-language">—</span></div>
+      <div class="row"><span class="k">Device</span><span class="v" id="printer-device">—</span></div>
+      <div id="printer-msg" class="msg" hidden></div>
+      <div id="printer-model-msg" class="msg" hidden></div>
+    </div>
+
+    <div class="card">
+      <h2>Test Print</h2>
+      <div class="row">
+        <span class="k">Sample label</span>
+        <span class="v">
+          <select id="test-print-select">
+            <option value="simple">Simple test print — ZPL</option>
+            <option value="barcode">Barcode — EPL</option>
+            <option value="visit">Visit summary — EPL</option>
+          </select>
+          <button id="test-print-button">Print</button>
+        </span>
+      </div>
+      <p class="hint" id="test-print-hint">
+        Samples use a 7.5 × 2.5 in logical canvas (1523 × 508 dots at 203 dpi).
+        The selected printer and its loaded media must support that physical size.
+      </p>
+      <div id="test-print-msg" class="msg" hidden></div>
+    </div>
+
+    <div class="card">
+      <h2>Server</h2>
+      <div class="row">
+        <span class="k">Port</span>
+        <span class="v">
+          <input id="port-input" type="number" min="1" max="65535" inputmode="numeric">
+          <button id="port-save">Save</button>
+        </span>
+      </div>
+      <div id="port-msg" class="msg" hidden></div>
+    </div>
+
+    <div class="card">
+      <h2>Print Jobs <span id="job-count" style="color:var(--muted);font-weight:400"></span></h2>
+      <div class="table-wrap">
+        <table id="jobs-table" hidden>
+          <thead>
+            <tr><th>Job ID</th><th>User</th><th>Size</th><th>Submitted</th><th>State</th></tr>
+          </thead>
+          <tbody id="jobs-body"></tbody>
+        </table>
+      </div>
+      <div id="jobs-empty" class="empty">No jobs running or pending.</div>
+    </div>
+
+    <div class="foot" id="foot">Updating…</div>
+  </div>
+
+  <script>
+    const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
+    const select = document.getElementById('printer-select');
+    const msg = document.getElementById('printer-msg');
+    const printerModelSelect = document.getElementById('printer-model-select');
+    const printerModelMsg = document.getElementById('printer-model-msg');
+    const testPrintSelect = document.getElementById('test-print-select');
+    const testPrintButton = document.getElementById('test-print-button');
+    const testPrintMsg = document.getElementById('test-print-msg');
+    const testPrintHint = document.getElementById('test-print-hint');
+
+    const TEST_PRINTS = Object.freeze({
+      simple: [
+        '^XA',
+        '^PW1523',
+        '^LL508',
+        '^FO50,50^A0N,40,40^FDTest Print^FS',
+        '^FO50,100^FDTEST^FS',
+        '^XZ',
+      ].join('\n'),
+      barcode: [
+        'N',
+        'q1523',
+        'Q508,026',
+        'ZT',
+        'B50,110,0,1,3,8,120,N,"P100100000025"',
+        'A35,30,0,3,1,1,N,"John Banda (M)"',
+        'A35,76,0,3,1,1,N,"MRN: P100100000025  DOB: 1969-03-11"',
+        'P1',
+      ].join('\n'),
+      visit: [
+        'N',
+        'q1523',
+        'Q508,026',
+        'ZT',
+        'A15,10,0,3,1,1,N,"VISIT:"',
+        'A16,10,0,3,1,1,N,"VISIT:"',
+        'A87,10,0,3,1,1,N," 16 Jun, 2026 (John Banda) | "',
+        'A435,10,0,3,1,1,N,"VITALS:"',
+        'A436,10,0,3,1,1,N,"VITALS:"',
+        'A519,10,0,3,1,1,N," Ht 158cm, BP"',
+        'A15,40,0,3,1,1,N," 123/86, Temp 38C, P 86, RR 22, SpO2 99%"',
+        'A618,250,0,3,1,1,N,"Seen by: biglu"',
+        'P1',
+      ].join('\n'),
+    });
+
+    function updatePrinterHint(printerModel) {
+      testPrintHint.textContent = printerModel === 'OCOM'
+        ? 'Samples use a 7.5 × 2.5 in logical canvas. The OCOM OCBP-T4201 has a 4-inch-wide printhead, so a 7.5-inch-wide layout cannot print at physical size without rotating/redesigning it.'
+        : 'Samples use a 7.5 × 2.5 in logical canvas (1523 × 508 dots at 203 dpi). The selected printer and its loaded media must support that physical size.';
+    }
+    updatePrinterHint(printerModelSelect.value);
+
+    function showMsg(text, ok) {
+      msg.textContent = text;
+      msg.className = 'msg ' + (ok ? 'ok' : 'err');
+      msg.hidden = false;
+    }
+
+    // Load the list of available printers into the dropdown (once, on startup).
+    async function loadPrinters() {
+      try {
+        const res = await fetch('/printers', { cache: 'no-store' });
+        const data = await res.json();
+        select.innerHTML = data.printers
+          .map(p => '<option value="' + esc(p.name) + '">' + esc(p.name) +
+            ' — ' + esc(p.detectedModel || 'ZEBRA') + '</option>').join('');
+        if (!data.printers.length) {
+          select.innerHTML = '<option value="">No CUPS printers installed</option>';
+          select.disabled = true;
+        }
+        if (data.configured) select.value = data.configured;
+        if (data.configuredModel) {
+          printerModelSelect.value = data.configuredModel;
+          updatePrinterHint(data.configuredModel);
+        }
+      } catch (err) {
+        select.innerHTML = '<option>Could not load printers</option>';
+      }
+    }
+
+    // Switch the active printer when the user picks a different one.
+    select.addEventListener('change', async () => {
+      const name = select.value;
+      select.disabled = true;
+      try {
+        const res = await fetch('/printer', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ printerName: name }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to switch printer');
+        printerModelSelect.value = data.printerModel;
+        updatePrinterHint(data.printerModel);
+        showMsg('Active printer set to ' + name + ' as ' + data.printerModel, true);
+        refresh();
+      } catch (err) {
+        showMsg('Error: ' + err.message, false);
+      } finally {
+        select.disabled = false;
+      }
+    });
+
+    printerModelSelect.addEventListener('change', async () => {
+      const printerModel = printerModelSelect.value;
+      printerModelSelect.disabled = true;
+      printerModelMsg.hidden = true;
+      try {
+        const res = await fetch('/printer-model', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ printerModel }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to change printer model');
+        updatePrinterHint(data.printerModel);
+        printerModelMsg.textContent = data.printerModel === 'OCOM'
+          ? 'OCOM selected — ZPL/EPL will be sent unchanged to the OCOM driver.'
+          : data.printerModel + ' selected — ZPL/EPL will be sent directly.';
+        printerModelMsg.className = 'msg ok';
+        printerModelMsg.hidden = false;
+        refresh();
+      } catch (err) {
+        printerModelMsg.textContent = 'Error: ' + err.message;
+        printerModelMsg.className = 'msg err';
+        printerModelMsg.hidden = false;
+      } finally {
+        printerModelSelect.disabled = false;
+      }
+    });
+
+    testPrintButton.addEventListener('click', async () => {
+      const sample = TEST_PRINTS[testPrintSelect.value];
+      if (!sample) return;
+
+      testPrintButton.disabled = true;
+      testPrintSelect.disabled = true;
+      testPrintMsg.hidden = true;
+      try {
+        const res = await fetch('/print', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ commands: sample }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to print the sample label');
+        testPrintMsg.textContent =
+          'Submitted ' + data.commandLanguage + ' test label' +
+          (data.jobId ? ' as ' + data.jobId : '') + '.' +
+          (data.warnings && data.warnings.length
+            ? ' Warning: ' + data.warnings.join(' ')
+            : '');
+        testPrintMsg.className = 'msg ok';
+        testPrintMsg.hidden = false;
+        refresh();
+      } catch (err) {
+        testPrintMsg.textContent = 'Error: ' + err.message;
+        testPrintMsg.className = 'msg err';
+        testPrintMsg.hidden = false;
+      } finally {
+        testPrintButton.disabled = false;
+        testPrintSelect.disabled = false;
+      }
+    });
+
+    // Save + apply a new server port, then follow the browser to the new port.
+    const portInput = document.getElementById('port-input');
+    const portSave = document.getElementById('port-save');
+    const portMsg = document.getElementById('port-msg');
+    let portInitialized = false;
+
+    portSave.addEventListener('click', async () => {
+      const newPort = Number(portInput.value);
+      portSave.disabled = true; portInput.disabled = true;
+      const setPortMsg = (t, ok) => { portMsg.textContent = t; portMsg.className = 'msg ' + (ok ? 'ok' : 'err'); portMsg.hidden = false; };
+      try {
+        const res = await fetch('/port', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ port: newPort }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to change port');
+        if (data.port === Number(location.port || 80)) {
+          setPortMsg('Port unchanged.', true);
+        } else {
+          setPortMsg('Port changed to ' + data.port + ' — reloading…', true);
+          setTimeout(() => {
+            location.href = location.protocol + '//' + location.hostname + ':' + data.port + '/';
+          }, 900);
+          return; // leave controls disabled while navigating
+        }
+      } catch (err) {
+        setPortMsg('Error: ' + err.message, false);
+      }
+      portSave.disabled = false; portInput.disabled = false;
+    });
+
+    async function refresh() {
+      const service = document.getElementById('service');
+      try {
+        const res = await fetch('/status', { cache: 'no-store' });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const data = await res.json();
+
+        service.className = 'pill ok';
+        service.innerHTML = '<span class="dot live"></span> Running';
+
+        // Keep the dropdown in sync with the active printer, unless the user
+        // is currently interacting with it.
+        if (data.printer.name && document.activeElement !== select && !select.disabled) {
+          select.value = data.printer.name;
+        }
+        const printer = data.printer || {};
+        document.getElementById('printer-state').textContent =
+          (printer.available ? '' : '⚠ unavailable — ') + (printer.state || 'unknown');
+
+        const connection = document.getElementById('printer-connection');
+        if (printer.connected === true) {
+          connection.textContent = 'USB connected';
+          connection.className = 'v ok';
+        } else if (printer.connected === false) {
+          connection.textContent = printer.queueAvailable
+            ? 'USB unplugged or powered off'
+            : 'Printer queue not installed';
+          connection.className = 'v err';
+        } else {
+          connection.textContent = printer.reason || 'Managed by CUPS';
+          connection.className = 'v';
+        }
+        document.getElementById('printer-driver').textContent = printer.driver || '—';
+        document.getElementById('printer-device').textContent = printer.deviceUri || '—';
+        const lastCommand = data.lastCommand;
+        document.getElementById('last-command-language').textContent = lastCommand
+          ? lastCommand.language + ' — ' + lastCommand.outcome
+          : '—';
+        if (
+          data.printerModel
+          && document.activeElement !== printerModelSelect
+          && !printerModelSelect.disabled
+        ) {
+          printerModelSelect.value = data.printerModel;
+          updatePrinterHint(data.printerModel);
+        }
+
+        // Seed the port field once (don't overwrite while the user edits it).
+        if (!portInitialized && data.port != null && document.activeElement !== portInput) {
+          portInput.value = data.port;
+          portInitialized = true;
+        }
+
+        const jobs = data.jobs || [];
+        const table = document.getElementById('jobs-table');
+        const empty = document.getElementById('jobs-empty');
+        const count = document.getElementById('job-count');
+        count.textContent = jobs.length ? '(' + jobs.length + ')' : '';
+
+        if (jobs.length) {
+          document.getElementById('jobs-body').innerHTML = jobs.map(j =>
+            '<tr><td>' + esc(j.id) + '</td><td>' + esc(j.user) + '</td><td>' + esc(j.size) +
+            '</td><td>' + esc(j.submitted) + '</td><td><span class="badge ' + esc(j.state) + '">' +
+            esc(j.state) + '</span></td></tr>').join('');
+          table.hidden = false; empty.hidden = true;
+        } else {
+          table.hidden = true; empty.hidden = false;
+        }
+
+        document.getElementById('foot').textContent = 'Last updated ' + new Date().toLocaleTimeString();
+      } catch (err) {
+        service.className = 'pill err';
+        service.innerHTML = '<span class="dot"></span> Unreachable';
+        document.getElementById('foot').textContent = 'Could not reach service — ' + err.message;
+      }
+    }
+
+    loadPrinters();
+    refresh();
+    setInterval(refresh, 3000);
+  </script>
+</body>
+</html>

@@ -1,19 +1,23 @@
 {
   "name": "zpl",
-  "version": "1.0.0",
-  "description": "",
+  "version": "1.5.3",
+  "description": "ZPL/EPL-aware printing service for raw printers and the OCOM CUPS driver",
   "main": "main.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "setup": "node main.js setup",
+    "install-service": "bash install-service.sh",
+    "test": "node --test tests/*.test.js"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "body-parser": "^1.20.2",
-    "cors": "^2.8.5",
+    "@inquirer/prompts": "^7.10.1",
+    "body-parser": "^2.3.0",
+    "bwip-js": "^4.11.2",
+    "cors": "^2.8.6",
     "dotenv": "^16.4.5",
-    "express": "^4.19.2",
-    "usb": "^2.13.0"
+    "express": "^4.22.2",
+    "pdfkit": "^0.19.1"
   }
 }
