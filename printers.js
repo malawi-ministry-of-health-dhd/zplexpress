@@ -391,21 +391,23 @@ function buildPrintArgs(printerName, commandLanguage = null) {
     throw new TypeError('A printer name is required');
   }
 
+  // Preserve main's raw Zebra/Argox print path exactly: select the queue,
+  // enable CUPS raw mode, and stream the original command bytes on stdin.
+  if (!commandLanguage) {
+    return ['-d', printerName, '-o', 'raw'];
+  }
+
   /*
-   * Embedded ^PQ/P quantities are handled by the printer language/OCOM
-   * renderer. Force the outer CUPS job to one copy so a saved lpoptions
-   * copies=2 value cannot duplicate an otherwise single-label request.
+   * OCOM commands are handled by the installed language-specific CUPS
+   * filters. Force the outer CUPS job to one copy so a saved lpoptions
+   * copies=2 value cannot duplicate an embedded ^PQ/P quantity.
    */
   const args = ['-d', printerName, '-n', '1', '-t', 'ZPLExpress label'];
-  if (commandLanguage) {
-    const documentFormat = OCOM_COMMAND_FORMATS[String(commandLanguage).toUpperCase()];
-    if (!documentFormat) {
-      throw new TypeError('OCOM command language must be ZPL or EPL');
-    }
-    args.push('-o', `document-format=${documentFormat}`);
-  } else {
-    args.push('-o', 'raw');
+  const documentFormat = OCOM_COMMAND_FORMATS[String(commandLanguage).toUpperCase()];
+  if (!documentFormat) {
+    throw new TypeError('OCOM command language must be ZPL or EPL');
   }
+  args.push('-o', `document-format=${documentFormat}`);
   args.push('-');
   return args;
 }

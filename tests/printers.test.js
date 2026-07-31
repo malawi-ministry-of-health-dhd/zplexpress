@@ -126,25 +126,15 @@ test('routes OCOM through language MIME filters and ARGOX/ZEBRA as raw commands'
   assert.deepEqual(buildPrintArgs('Zebra_GK420d'), [
     '-d',
     'Zebra_GK420d',
-    '-n',
-    '1',
-    '-t',
-    'ZPLExpress label',
     '-o',
     'raw',
-    '-',
   ]);
 
   assert.deepEqual(buildPrintArgs('Argox_OS-2140'), [
     '-d',
     'Argox_OS-2140',
-    '-n',
-    '1',
-    '-t',
-    'ZPLExpress label',
     '-o',
     'raw',
-    '-',
   ]);
 
   assert.throws(

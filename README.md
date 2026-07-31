@@ -203,7 +203,7 @@ with `RUN_USER` / `RUN_GROUP` set.
 
 Once the service is running, you can send ZPL commands to your configured
 printer through the API endpoints. ARGOX and ZEBRA jobs are submitted with
-`lp -o raw`; ZPLExpress does not translate their ZPL or EPL.
+`lp -d <queue> -o raw`; ZPLExpress does not translate their ZPL or EPL.
 
 ### ZPL and EPL detection
 

@@ -24,7 +24,14 @@ function writeCommand(directory, name, contents) {
   fs.writeFileSync(filename, `#!/bin/sh\n${contents}`, { mode: 0o755 });
 }
 
-async function submitToMockOcom(requestField, commands, legacyRenderMode) {
+async function submitToMockPrinter({
+  requestField,
+  commands,
+  printerName,
+  printerModel,
+  deviceUri,
+  legacyRenderMode = null,
+}) {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zplexpress-epl-server-'));
   const oldPath = process.env.PATH;
   const argsFile = path.join(tempDir, 'lp-args');
@@ -33,20 +40,20 @@ async function submitToMockOcom(requestField, commands, legacyRenderMode) {
 
   writeCommand(tempDir, 'lpstat', [
     'case "$1" in',
-    '  -p) printf "%s\\n" "printer OCOM_Ubuntu_Driver is idle. enabled since now" ;;',
-    '  -v) printf "%s\\n" "device for OCOM_Ubuntu_Driver: usb://LabelPrinter/OCBP-T4201?serial=ABC123" ;;',
+    `  -p) printf "%s\\n" "printer ${printerName} is idle. enabled since now" ;;`,
+    `  -v) printf "%s\\n" "device for ${printerName}: ${deviceUri}" ;;`,
     '  -o) exit 0 ;;',
     'esac',
   ].join('\n'));
   writeCommand(
     tempDir,
     'lpinfo',
-    'printf "%s\\n" "direct usb://LabelPrinter/OCBP-T4201?serial=ABC123"\n',
+    `printf "%s\\n" "direct ${deviceUri}"\n`,
   );
   writeCommand(tempDir, 'lp', [
     'printf "%s\\n" "$@" > "$ZPL_TEST_ARGS"',
     'cat > "$ZPL_TEST_INPUT"',
-    'printf "%s\\n" "request id is OCOM_Ubuntu_Driver-55 (1 file(s))"',
+    `printf "%s\\n" "request id is ${printerName}-55 (1 file(s))"`,
   ].join('\n'));
 
   process.env.PATH = `${tempDir}:${oldPath}`;
@@ -54,8 +61,8 @@ async function submitToMockOcom(requestField, commands, legacyRenderMode) {
   process.env.ZPL_TEST_INPUT = inputFile;
   try {
     ({ httpServer } = await startServer({
-      printerName: 'OCOM_Ubuntu_Driver',
-      printerModel: 'OCOM',
+      printerName,
+      printerModel,
       port: 0,
       renderMode: legacyRenderMode,
       persist: false,
@@ -85,6 +92,17 @@ async function submitToMockOcom(requestField, commands, legacyRenderMode) {
   }
 }
 
+function submitToMockOcom(requestField, commands, legacyRenderMode) {
+  return submitToMockPrinter({
+    requestField,
+    commands,
+    printerName: 'OCOM_Ubuntu_Driver',
+    printerModel: 'OCOM',
+    deviceUri: 'usb://LabelPrinter/OCBP-T4201?serial=ABC123',
+    legacyRenderMode,
+  });
+}
+
 test('OCOM submits detected EPL bytes unchanged with the EPL driver MIME type', async () => {
   const result = await submitToMockOcom('epl', EPL, 'PDFRaster');
 
@@ -109,6 +127,44 @@ test('OCOM submits detected ZPL bytes unchanged with the ZPL driver MIME type', 
   assert.doesNotMatch(result.args, /application\/pdf|PageSize=|(?:^|\n)raw(?:\n|$)/);
   assert.deepEqual(result.input, Buffer.from(ZPL, 'utf8'));
 });
+
+for (const printer of [
+  {
+    model: 'ZEBRA',
+    name: 'Zebra_GK420d',
+    uri: 'usb://Zebra/GK420d?serial=ZEBRA123',
+  },
+  {
+    model: 'ARGOX',
+    name: 'Argox_OS-2140',
+    uri: 'usb://Argox/OS-2140?serial=ARGOX123',
+  },
+]) {
+  for (const [requestField, commands, language] of [
+    ['zpl', ZPL, 'ZPL'],
+    ['epl', EPL, 'EPL'],
+  ]) {
+    test(`${printer.model} submits ${language} exactly through main-style raw printing`, async () => {
+      const result = await submitToMockPrinter({
+        requestField,
+        commands,
+        printerName: printer.name,
+        printerModel: printer.model,
+        deviceUri: printer.uri,
+      });
+
+      assert.equal(result.status, 200);
+      assert.equal(result.body.commandLanguage, language);
+      assert.equal(result.body.printRoute, 'RawCommands');
+      assert.equal(result.body.driver, `${printer.model} raw ${language}`);
+      assert.deepEqual(
+        result.args.trim().split('\n'),
+        ['-d', printer.name, '-o', 'raw'],
+      );
+      assert.deepEqual(result.input, Buffer.from(commands, 'utf8'));
+    });
+  }
+}
 
 test('language detection endpoint inspects content in the legacy zpl field', async () => {
   const { httpServer } = await startServer({
